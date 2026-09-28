@@ -47,7 +47,8 @@ SETTLE_MS = 300             # 前 300 ms 算牵引过程，统计指标只看稳
 TRUE_CN0 = 45.0
 # 多星场景下 C/N0 估计会偏低：另外 4 颗星的互相关（上界 65/1023 ≈ 6.4%）
 # 会抬高噪声底，实测约低 2-3 dB。这是真实存在的物理效应，不是估计器误差。
-CN0_FLOOR_MULTI = 41.0
+# 写成相对值，这样改 TRUE_CN0 做实验时判据会跟着走。
+CN0_FLOOR_MULTI = TRUE_CN0 - 4.0
 
 CFG = TrackingConfig(dll_bandwidth_hz=2.0, pll_bandwidth_hz=25.0, carrier_aiding=True)
 
