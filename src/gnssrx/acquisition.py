@@ -1,0 +1,103 @@
+"""并行码相位 FFT 捕获（Borre《软件定义的 GPS 与伽利略接收机》第 6 章算法）。
+
+核心思想：
+    穷举多普勒频点 × 一次 FFT 搞定全部 1023 个码相位。
+    1 ms 数据做一次 FFT 相关，就能同时试出所有码相位——这是软件接收机之所以可行的关键。
+
+    对某个多普勒候选 f：
+        1) 把中频信号下变频到基带：x[n] * exp(-j*2π*f*n/fs)
+        2) acc = |IFFT( FFT(基带信号) * conj(FFT(本地码)) )|²
+        3) acc 的最大值位置 = 该卫星的码相位，最大值对应的 f = 多普勒
+
+判据：
+    峰值 / 次峰值 > 门限（通常 2.0~2.5）才算捕获成功。
+    只看绝对峰值会被强信号漏进来的旁瓣骗到。
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from .ca_code import CODE_LENGTH, CODE_RATE_HZ, PRN_LIST, generate_ca
+
+
+def code_replica(prn: int, fs: float) -> np.ndarray:
+    """把 1023 个码片按采样率重采样成 1 ms 长的本地码副本。"""
+    spc = int(round(fs / 1e3))
+    idx = (np.floor(np.arange(spc) * (CODE_RATE_HZ / fs)).astype(np.int64)) % CODE_LENGTH
+    return generate_ca(prn).astype(np.float64)[idx]
+
+
+def acquire_prn(
+    data: np.ndarray,
+    fs: float,
+    f_if: float,
+    prn: int,
+    *,
+    ms: int = 1,
+    doppler_half_range: float = 6000.0,
+    doppler_step: float = 500.0,
+    replica: np.ndarray | None = None,
+) -> dict:
+    """对单颗卫星做捕获，返回最佳（多普勒, 码相位）及其置信度指标。"""
+    spc = int(round(fs / 1e3))
+    x = np.asarray(data, dtype=np.float64)
+    if x.size < spc * ms:
+        raise ValueError(f"数据不足：需要 {spc * ms} 点，实际 {x.size} 点")
+
+    if replica is None:
+        replica = code_replica(prn, fs)
+    code_fft = np.conj(np.fft.fft(replica))
+
+    ts = 1.0 / fs
+    phase = 2.0 * np.pi * ts * np.arange(spc)
+
+    # 相关峰主瓣宽度约 ±1 码片，判次峰时要挖掉它旁边的点
+    guard = max(1, int(round(2.0 * fs / CODE_RATE_HZ)))
+    all_idx = np.arange(spc)
+
+    acc = np.empty(spc)
+    best: dict | None = None
+
+    for f_d in np.arange(-doppler_half_range, doppler_half_range + doppler_step, doppler_step):
+        acc[:] = 0.0
+        for m in range(ms):                       # 非相干累加，抗噪声
+            block = x[m * spc:(m + 1) * spc]
+            iq = block * np.exp(-1j * (f_if + f_d) * phase)
+            acc += np.abs(np.fft.ifft(np.fft.fft(iq) * code_fft)) ** 2
+
+        k = int(np.argmax(acc))
+        peak = float(acc[k])
+        circular = (all_idx - k + spc // 2) % spc - spc // 2
+        second = float(acc[np.abs(circular) > guard].max())
+
+        if best is None or peak > best["peak"]:
+            best = {
+                "prn": prn,
+                "doppler_hz": float(f_d),
+                "code_phase_samples": k,
+                "code_phase_chips": float(k * CODE_RATE_HZ / fs),
+                "peak": peak,
+                "second_peak": second,
+                "peak_ratio": float(peak / second) if second > 0 else np.inf,
+                "peak_over_mean": float(peak / acc.mean()) if acc.mean() > 0 else np.inf,
+            }
+
+    assert best is not None
+    return best
+
+
+def acquire_all(
+    data: np.ndarray,
+    fs: float,
+    f_if: float,
+    prns=PRN_LIST,
+    **kwargs,
+) -> list[dict]:
+    """对所有 PRN 依次捕获，按峰值/次峰值比从高到低返回。"""
+    results = [acquire_prn(data, fs, f_if, p, **kwargs) for p in prns]
+    return sorted(results, key=lambda r: r["peak_ratio"], reverse=True)
+
+
+def detect(results: list[dict], threshold: float = 2.5) -> list[dict]:
+    """按门限筛出"捕获成功"的卫星。"""
+    return [r for r in results if r["peak_ratio"] >= threshold]

@@ -1,0 +1,19 @@
+# ---- Python ----
+.venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# ---- 数据：中频采样动辄几百 MB，绝对不能进 Git ----
+data/raw/*
+!data/raw/.gitkeep
+*.bin
+*.dat
+*.mat
+
+# ---- 工具缓存 / 中间产物 ----
+.uv-cache/
+results/
+
+# ---- macOS ----
+.DS_Store

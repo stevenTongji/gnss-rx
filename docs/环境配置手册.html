@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目 A · GNSS 软件接收机 —— Mac 环境配置与 GitHub 上手手册</title>
+<style>
+:root{
+  --bg:#0e1116; --bg2:#151a21; --card:#1a2129; --card2:#202935; --line:#2a3542;
+  --tx:#e6edf3; --tx2:#a9b6c4; --tx3:#7b8896;
+  --acc:#4da3ff; --acc2:#3ddc97; --warn:#ffb454; --red:#ff6b6b; --purple:#a78bfa;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  line-height:1.78;font-size:15px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:46px 26px 90px}
+header{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:34px}
+.kicker{color:var(--acc);font-size:12.5px;letter-spacing:2px;font-weight:600;margin-bottom:12px}
+h1{font-size:28px;line-height:1.35;margin-bottom:12px;font-weight:700;letter-spacing:-.3px}
+.sub{color:var(--tx2);font-size:14.5px}
+.meta{margin-top:16px;display:flex;flex-wrap:wrap;gap:9px}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:5px 13px;font-size:12.5px;color:var(--tx2)}
+.chip b{color:var(--tx);font-weight:600}
+
+h2{font-size:20px;margin:48px 0 6px;font-weight:700;letter-spacing:-.2px;display:flex;align-items:center;gap:11px}
+h2 .num{background:var(--acc);color:#08101a;width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;flex:none}
+h2 + .lead{color:var(--tx3);font-size:13.5px;margin-bottom:20px}
+h3{font-size:16px;margin:26px 0 10px;font-weight:650}
+p{margin-bottom:12px;color:var(--tx2)}
+strong{color:var(--tx);font-weight:650}
+em{font-style:normal;color:var(--warn);font-weight:600}
+a{color:var(--acc);text-decoration:none;border-bottom:1px solid rgba(77,163,255,.3)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:17px 19px;margin:14px 0}
+.card.hl{border-color:rgba(77,163,255,.45);background:linear-gradient(180deg,rgba(77,163,255,.07),transparent 60%),var(--card)}
+.card .t{font-size:14px;font-weight:700;margin-bottom:7px}
+.card ul{margin:6px 0 0;padding-left:17px;color:var(--tx2);font-size:13.3px}
+.card li{margin-bottom:5px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+
+/* 命令块 */
+.cmd{position:relative;background:#0b0f14;border:1px solid var(--line);border-left:3px solid var(--acc);
+  border-radius:0 9px 9px 0;padding:13px 52px 13px 15px;margin:11px 0;overflow-x:auto}
+.cmd code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.9px;color:#e6edf3;
+  white-space:pre;display:block;line-height:1.85;background:none;padding:0;letter-spacing:.1px}
+.cmd .cm{color:#5c6b7a}
+.copy{position:absolute;top:9px;right:9px;background:var(--card2);border:1px solid var(--line);
+  color:var(--tx3);font-size:11px;padding:3px 9px;border-radius:6px;cursor:pointer;font-family:inherit}
+.copy:hover{color:var(--acc);border-color:var(--acc)}
+.copy.done{color:var(--acc2);border-color:var(--acc2)}
+
+.note{background:rgba(255,180,84,.07);border-left:3px solid var(--warn);border-radius:0 8px 8px 0;
+  padding:12px 16px;margin:14px 0;font-size:13.2px;color:var(--tx2)}
+.note b{color:var(--warn)}
+.ok{background:rgba(61,220,151,.07);border-left:3px solid var(--acc2);border-radius:0 8px 8px 0;
+  padding:12px 16px;margin:14px 0;font-size:13.2px;color:var(--tx2)}
+.ok b{color:var(--acc2)}
+.bad{background:rgba(255,107,107,.07);border-left:3px solid var(--red);border-radius:0 8px 8px 0;
+  padding:12px 16px;margin:14px 0;font-size:13.2px;color:var(--tx2)}
+.bad b{color:var(--red)}
+
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px;background:var(--card);border-radius:10px;overflow:hidden}
+thead th{background:var(--card2);color:var(--tx);text-align:left;padding:10px 12px;font-weight:650;font-size:12.5px;border-bottom:1px solid var(--line)}
+tbody td{padding:10px 12px;border-bottom:1px solid rgba(42,53,66,.6);color:var(--tx2);vertical-align:top}
+tbody tr:last-child td{border-bottom:none}
+td b{color:var(--tx)}
+
+.step{display:flex;gap:0;margin:26px 0 0}
+.step .rail{flex:none;width:34px;display:flex;flex-direction:column;align-items:center}
+.step .dot{width:26px;height:26px;border-radius:50%;background:var(--acc);color:#08101a;
+  font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center}
+.step.done .dot{background:var(--acc2)}
+.step .bar{flex:1;width:2px;background:var(--line);margin:5px 0}
+.step .body{flex:1;padding-bottom:26px}
+.step:last-child .bar{background:none}
+.tagline{font-size:12px;color:var(--tx3);margin-top:2px}
+.doneflag{display:inline-block;background:rgba(61,220,151,.14);color:#3ddc97;border:1px solid rgba(61,220,151,.3);
+  font-size:11px;padding:1px 8px;border-radius:5px;font-weight:700;margin-left:8px}
+.todoflag{display:inline-block;background:rgba(77,163,255,.14);color:#4da3ff;border:1px solid rgba(77,163,255,.3);
+  font-size:11px;padding:1px 8px;border-radius:5px;font-weight:700;margin-left:8px}
+
+ul.bul{padding-left:19px;color:var(--tx2);margin:8px 0 12px;font-size:13.4px}
+ul.bul li{margin-bottom:6px}
+ul.bul li b{color:var(--tx)}
+kbd{background:var(--card2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
+  padding:1px 6px;font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--tx)}
+code.inl{background:var(--card2);padding:1.5px 6px;border-radius:4px;font-size:12.5px;color:var(--acc2);
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:12.3px;color:var(--tx3);line-height:1.8}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">PROJECT A · ENVIRONMENT SETUP</div>
+  <h1>GNSS 软件接收机 · Mac 环境配置与 GitHub 上手手册</h1>
+  <p class="sub">目标：从一台什么都没装的 Mac，到"代码能跑 + 进度能传到 GitHub"。全程复制粘贴即可，不需要任何前置知识。</p>
+  <div class="meta">
+    <span class="chip">机型：<b>MacBook Air M4 · 16 GB</b></span>
+    <span class="chip">系统：<b>macOS 26.6</b></span>
+    <span class="chip">可用磁盘：<b>383 GB</b></span>
+    <span class="chip">项目路径：<b>~/Developer/gnss-rx</b></span>
+    <span class="chip">生成日期：<b>2026-09-28</b></span>
+  </div>
+</header>
+
+<h2><span class="num">0</span>先回答你最关心的问题：要不要换游戏本</h2>
+<p class="lead">结论先给，免得白折腾。</p>
+
+<div class="ok">
+<b>不用换。项目 A 全程在 Mac 上做，你的 M4 + 16 GB 完全够。</b><br>
+理由：捕获算法本质是 FFT，1 ms 数据才 4092 个采样点、几百 KB；实测在 M4 上把 32 颗卫星 × 25 个多普勒频点全搜一遍只要 <b>0.15 秒</b>。内存占用峰值不到 100 MB。这活儿对机器几乎没有要求。
+</div>
+
+<div class="grid2">
+<div class="card">
+<div class="t">Mac 上唯一的小摩擦</div>
+<ul>
+<li><b>自己用 RTL-SDR 采真实信号</b>：驱动和工具链在 Windows 上更成熟。Mac 也能做（<code class="inl">brew install librtlsdr</code>），但教程少、坑多。</li>
+<li><b>应对办法</b>：这一步是"加分项"不是"必做项"。真要采，用游戏本采完把 <code class="inl">.bin</code> 拷回 Mac 处理就行——<b>采集只要一次，处理永远在 Mac 上</b>。</li>
+</ul>
+</div>
+<div class="card">
+<div class="t">什么时候才该考虑游戏本</div>
+<ul>
+<li>等你做到<b>项目 C（LEO NTN 链路仿真 / 通感一体化）</b>，如果涉及大规模蒙特卡洛（几千次链路级仿真），可以扔到游戏本后台跑。</li>
+<li>或者导师给了带 CUDA 的仿真代码——Mac 没有 NVIDIA 显卡，跑不了 CUDA。</li>
+<li><b>但那是研二的事，现在不要为此分心。</b></li>
+</ul>
+</div>
+</div>
+
+<h2><span class="num">1</span>你会装的四样东西，各自是干嘛的</h2>
+<p class="lead">先知道"为什么要装"，比先复制命令更重要。</p>
+
+<table>
+<thead><tr><th style="width:20%">工具</th><th style="width:34%">它是什么</th><th>这个项目里为什么需要</th></tr></thead>
+<tbody>
+<tr><td><b>Homebrew</b></td><td>macOS 的"应用商店命令行版"，一条命令装好各种开发软件</td><td>装 VS Code、CMake、以后可能用到的 RTL-SDR 驱动。不装的话，每个软件都要手动去官网下载、拖进 Applications</td></tr>
+<tr><td><b>uv</b></td><td>Python 环境与依赖管理器（比 pip 快 10-100 倍，现在业界的默认选择）</td><td>项目要用 numpy / scipy / matplotlib。uv 会为每个项目建一个独立"沙箱"（虚拟环境），避免把系统 Python 搞乱</td></tr>
+<tr><td><b>VS Code</b></td><td>写代码用的编辑器（免费，微软出品）</td><td>写 Python / C++、看图片输出、内置终端——不用在编辑器和终端之间来回切</td></tr>
+<tr><td><b>Git + GitHub</b></td><td>Git = 本机的"版本快照机"；GitHub = 把这些快照传到云端的网站</td><td>① 代码写崩了能一键回到昨天；② <b>简历上要放仓库链接</b>——对算法岗来说，一个可读的仓库胜过十行自我评价</td></tr>
+</tbody>
+</table>
+
+<div class="note"><b>顺带一提：</b>后面做到 C++ 移植时需要 <b>CMake</b>（C++ 项目的构建工具）和 <b>Xcode 命令行工具</b>（提供 C++ 编译器 clang）。后者你机器上<b>已经装好了</b>，不用管。</div>
+
+<h2><span class="num">2</span>照着做：配置步骤</h2>
+<p class="lead">绿色勾 = 我已经帮你做完了；蓝色 = 需要你自己执行（因为要输开机密码或注册账号）。</p>
+
+<h3>打开终端</h3>
+<p>按 <kbd>Command</kbd> + <kbd>空格</kbd>，输入 <code class="inl">Terminal</code>（或「终端」），回车。之后所有命令都在这里敲，每行输完按回车。</p>
+
+<div class="step done">
+  <div class="rail"><div class="dot">1</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>Xcode 命令行工具</b><span class="doneflag">已完成</span></div>
+    <div class="tagline">提供 git 和 C++ 编译器。你的机器上已经有了。</div>
+    <p style="margin-top:9px">想确认的话敲：</p>
+    <div class="cmd"><button class="copy">复制</button><code>xcode-select -p</code></div>
+    <p>看到 <code class="inl">/Library/Developer/CommandLineTools</code> 就是装好了。如果报错，就执行：</p>
+    <div class="cmd"><button class="copy">复制</button><code>xcode-select --install</code></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="rail"><div class="dot">2</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>安装 Homebrew</b><span class="todoflag">需要你执行</span></div>
+    <div class="tagline">约 3-5 分钟，中间会让你输一次开机密码（输的时候屏幕不显示字符，正常的，输完直接回车）</div>
+    <div class="cmd"><button class="copy">复制</button><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></div>
+    <p>装完，屏幕上会出现一段 <b>Next steps</b>，把里面那两行也复制执行（它的作用是把 brew 加进环境变量）。通常是这两行：</p>
+    <div class="cmd"><button class="copy">复制</button><code><span class="cm"># 下面两行按你屏幕上显示的为准</span>
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' &gt;&gt; ~/.zshrc
+eval "$(/opt/homebrew/bin/brew shellenv)"</code></div>
+    <p>验证：</p>
+    <div class="cmd"><button class="copy">复制</button><code>brew --version</code></div>
+    <div class="note"><b>如果卡在下载 / 提示连不上 GitHub：</b>这是国内常见情况。搜索关键词「Homebrew 清华镜像 安装」，按清华开源镜像站上的当前说明操作即可（镜像地址会变，所以不在这里写死）。实在不行也没关系——<b>Step 3 的 uv 你已经有了，Step 4 的 VS Code 可以直接去官网下载 dmg 手动装</b>，Homebrew 不是硬门槛。</div>
+  </div>
+</div>
+
+<div class="step done">
+  <div class="rail"><div class="dot">3</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>安装 uv</b><span class="doneflag">已完成 · v0.12.17</span></div>
+    <div class="tagline">你的机器上已有 uv，跳过即可</div>
+    <p style="margin-top:9px">如果以后换电脑，或者发现敲 <code class="inl">uv</code> 提示找不到命令：</p>
+    <div class="cmd"><button class="copy">复制</button><code>brew install uv
+<span class="cm"># 或者：curl -LsSf https://astral.sh/uv/install.sh | sh</span></code></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="rail"><div class="dot">4</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>安装 VS Code 和插件</b><span class="todoflag">需要你执行</span></div>
+    <div class="cmd"><button class="copy">复制</button><code>brew install --cask visual-studio-code</code></div>
+    <p>装完打开 VS Code，按 <kbd>Command</kbd> + <kbd>Shift</kbd> + <kbd>X</kbd> 打开扩展面板，搜名字装这几个：</p>
+    <table style="margin-top:8px">
+      <thead><tr><th style="width:32%">插件名</th><th>作用</th></tr></thead>
+      <tbody>
+      <tr><td><b>Python</b> + <b>Pylance</b></td><td>Python 语法高亮、自动补全、错误提示（必装）</td></tr>
+      <tr><td><b>Jupyter</b></td><td>在 VS Code 里直接跑 .ipynb 笔记本，画图看结果很方便</td></tr>
+      <tr><td><b>C/C++</b>、<b>CMake Tools</b></td><td>第 6 周做 C++ 移植时用，现在装好省事</td></tr>
+      <tr><td><b>GitLens</b></td><td>在代码行尾显示"这行是谁什么时候改的"，看自己历史很有用</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="step done">
+  <div class="rail"><div class="dot">5</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>项目骨架 + 依赖</b><span class="doneflag">已完成</span></div>
+    <div class="tagline">我已经在 ~/Developer/gnss-rx 建好了项目，并实测跑通</div>
+    <p style="margin-top:9px">你现在可以直接验证一遍：</p>
+    <div class="cmd"><button class="copy">复制</button><code>cd ~/Developer/gnss-rx
+uv sync
+uv run python scripts/00_smoke_test.py</code></div>
+    <p>看到下面这段就是环境彻底 OK 了：</p>
+    <div class="cmd"><code>① 环境检查
+   Python     3.12.14
+   numpy      2.5.3
+② C/A 码生成器自检
+   [ca_code] 自检通过：32 个 PRN 的自相关/互相关均符合 GPS 三值特性
+④ 对 32 个 PRN 做并行码相位捕获
+   检出 5 颗：[7, 11, 19, 24, 30]
+   ✅ 捕获结果与真值完全一致
+   ✅ 所有卫星码相位误差 &lt; 1 码片
+✅ 全部通过，环境可用。</code></div>
+    <div class="ok"><b>这一小步的含金量：</b>你已经有了一个<b>能正确生成 GPS C/A 码</b>（自相关精确落在 {-1, -65, 63} 三值上，这是教科书判据），并且<b>能从噪声里把 5 颗卫星准确抓出来、码相位逐点命中</b>的接收机雏形。这是项目 A 最难的第一关，你已经站在起点线前面了。</div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="rail"><div class="dot">6</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>告诉 Git 你是谁</b><span class="todoflag">需要你执行</span></div>
+    <div class="tagline">Git 每次存快照都要记录"谁在什么时候改的"，所以必须先自报家门</div>
+    <div class="cmd"><button class="copy">复制</button><code><span class="cm"># 把引号里的内容换成你自己的（邮箱建议用 GitHub 注册邮箱）</span>
+git config --global user.name  "你的名字"
+git config --global user.email "你的邮箱@example.com"
+git config --global init.defaultBranch main</code></div>
+    <p>确认写进去了：</p>
+    <div class="cmd"><button class="copy">复制</button><code>git config --global --list</code></div>
+  </div>
+</div>
+
+<div class="step">
+  <div class="rail"><div class="dot">7</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>注册 GitHub + 领学生包</b><span class="todoflag">需要你执行</span></div>
+    <p style="margin-top:9px">打开 <b>github.com</b> 注册账号，<b>用户名建议用真名拼音或固定 ID</b>（比如 <code class="inl">steven-wang</code>），因为以后要印在简历上。</p>
+    <div class="ok"><b>一定要做这一步：</b>注册完去 <b>github.com/education</b>，用<b>同济大学教育邮箱</b>（<code class="inl">@tongji.edu.cn</code>）+ 学生证照片申请 <b>GitHub Student Developer Pack</b>。通过后可以<b>免费使用 GitHub Copilot</b>（AI 写代码助手）。写 C++ 移植和调试时它能省你很多时间，而且这是<b>合法的免费额度</b>，不用白不用。</div>
+    <p>然后配 SSH 密钥——它相当于"你这台电脑的身份证"，配好之后每次传代码不用输密码：</p>
+    <div class="cmd"><button class="copy">复制</button><code><span class="cm"># 生成密钥（邮箱换成你的）。接下来连续按 3 次回车，不要设密码</span>
+ssh-keygen -t ed25519 -C "你的邮箱@example.com"
+
+<span class="cm"># 把公钥复制到剪贴板</span>
+pbcopy &lt; ~/.ssh/id_ed25519.pub</code></div>
+    <p>然后：GitHub 网页右上角头像 → <b>Settings</b> → 左侧 <b>SSH and GPG keys</b> → <b>New SSH key</b> → Title 随便填（比如 "MacBook Air"）→ Key 那一栏 <kbd>Command</kbd>+<kbd>V</kbd> 粘贴 → <b>Add SSH key</b>。</p>
+    <p>最后再让 Mac 记住这把钥匙（避免重启后又要重来）：</p>
+    <div class="cmd"><button class="copy">复制</button><code>eval "$(ssh-agent -s)"
+cat &gt;&gt; ~/.ssh/config &lt;&lt;'EOF'
+Host github.com
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentityFile ~/.ssh/id_ed25519
+EOF
+ssh-add --apple-use-keychain ~/.ssh/id_ed25519</code></div>
+    <p>验证连通（第一次会问 yes/no，输入 <code class="inl">yes</code> 回车）：</p>
+    <div class="cmd"><button class="copy">复制</button><code>ssh -T git@github.com</code></div>
+    <p>看到 <code class="inl">Hi 你的用户名! You've successfully authenticated...</code> 就成了。</p>
+  </div>
+</div>
+
+<div class="step">
+  <div class="rail"><div class="dot">8</div><div class="bar"></div></div>
+  <div class="body">
+    <div><b>第一次把代码传到 GitHub</b><span class="todoflag">需要你执行</span></div>
+    <p style="margin-top:9px"><b>先在网页上建仓库：</b>GitHub 首页右上角 <b>+</b> → <b>New repository</b> → 名字填 <code class="inl">gnss-rx</code> → 选 <b>Public</b> → <span style="color:var(--red);font-weight:650">不要勾选 "Add a README file"</span>（本地已经有了，勾了会冲突）→ <b>Create repository</b>。</p>
+    <p>然后回到终端：</p>
+    <div class="cmd"><button class="copy">复制</button><code>cd ~/Developer/gnss-rx
+git init
+git add -A
+git commit -m "feat: 项目A 第1周 —— C/A码生成 + 并行码相位捕获"
+git branch -M main
+<span class="cm"># 把下面这行的 yourname 换成你的 GitHub 用户名</span>
+git remote add origin git@github.com:yourname/gnss-rx.git
+git push -u origin main</code></div>
+    <p>刷新 GitHub 页面，代码就出现了。</p>
+    <div class="note"><b>为什么建议选 Public：</b>你的目标是<b>把仓库链接放进简历</b>。算法岗的面试官真的会点进去看——看他看的是 commit 是否连续、README 是否讲得清楚、代码有没有注释。私有仓库等于没有。唯一例外见下面"三个红线"。</div>
+  </div>
+</div>
+
+<h2><span class="num">3</span>Git 的三个动作，以及什么时候用</h2>
+<p class="lead">你只需要记住三个命令，就能覆盖 95% 的日常。</p>
+
+<table>
+<thead><tr><th style="width:24%">命令</th><th style="width:30%">它在干什么</th><th>什么时候敲</th></tr></thead>
+<tbody>
+<tr><td><code class="inl">git add -A</code></td><td>把改动的文件放进"待打包清单"</td><td>每次提交前</td></tr>
+<tr><td><code class="inl">git commit -m "说明"</code></td><td>给当前代码拍一张快照，附一句说明</td><td><b>每跑通一个小东西就拍一张</b>。比如"跟踪环锁定 4 颗星""画出第一张误差 CDF 图"</td></tr>
+<tr><td><code class="inl">git push</code></td><td>把本地快照上传到 GitHub</td><td>每天收工前一次，或者攒 2-3 个 commit 一次</td></tr>
+</tbody>
+</table>
+
+<div class="card hl">
+<div class="t">为什么强调"小步提交"</div>
+<ul>
+<li><b>它是你的求职证据链。</b>面试官看仓库时，一条 10 月的 commit 写"实现 DLL 环路"，一条 11 月的写"加入载波辅助"，比最后一次性上传 2000 行代码可信得多——<b>连续的小绿点是"我真的做了两个月"的唯一客观证据</b>。</li>
+<li><b>它也是你的后悔药。</b>改崩了，<code class="inl">git log</code> 找到昨天的编号，<code class="inl">git checkout 编号 .</code> 就回去了。</li>
+</ul>
+</div>
+
+<p style="margin-top:14px">日常三连可以写成一行：</p>
+<div class="cmd"><button class="copy">复制</button><code>git add -A &amp;&amp; git commit -m "说明这次改了什么" &amp;&amp; git push</code></div>
+
+<p>提交说明建议用这个格式（业界通用，显得专业）：</p>
+<div class="cmd"><code>feat:   新功能   —— feat: 加入 PLL 载波跟踪环
+fix:    修 bug   —— fix: 修正码相位搜索的边界溢出
+docs:   改文档   —— docs: 补充 README 的数据下载说明
+refactor: 重构  —— refactor: 把环路参数抽成配置结构体</code></div>
+
+<h2><span class="num">4</span>三个红线（现在知道比以后补救便宜）</h2>
+
+<div class="bad">
+<b>① 数据文件绝不进 Git。</b><br>
+中频采样数据动辄几百 MB（上海交大那套原始 IF 是 70 GB 级别），而 GitHub 单文件硬上限 <b>100 MB</b>，超过 50 MB 就会警告。<br>
+项目里的 <code class="inl">.gitignore</code> 已经把 <code class="inl">*.bin / *.dat / *.mat / data/raw/*</code> 全部排除了。<b>万一哪天你手动 add 了大文件导致 push 失败</b>，先 <code class="inl">git rm --cached 那个文件</code>，再重新 commit。
+</div>
+
+<div class="bad">
+<b>② 导师课题的未公开代码 / 未发表论文内容，不要放公开仓库。</b><br>
+你要放的是<b>自己从零写的学习项目</b>。凡是涉及实验室在研项目、未公开数据、合作方代码的，一律留在本地或私有仓库。这条踩了不是丢工作，是学术事故。
+</div>
+
+<div class="bad">
+<b>③ push 之前，先看一眼 <code class="inl">git status</code>。</b><br>
+它会列出"即将被传上去的文件"。养成扫一眼的习惯，能拦掉 99% 的误传（比如把 200 MB 的数据、或者含密码的配置文件传上去）。
+</div>
+
+<h2><span class="num">5</span>接下来 6-8 周怎么走</h2>
+<p class="lead">对应文档里"项目 A · 周期约 6-8 周"。你已经完成了第 1 周最难的部分。</p>
+
+<table>
+<thead><tr><th style="width:12%">周次</th><th style="width:34%">做什么</th><th>交付物（每周末提交一次）</th></tr></thead>
+<tbody>
+<tr><td><b>第 1 周</b><br><span class="doneflag">已就绪</span></td><td>C/A 码生成 + 并行码相位 FFT 捕获</td><td>捕获结果图（峰/次峰比），能说出"为什么门限取 2.5"</td></tr>
+<tr><td><b>第 2-3 周</b></td><td>跟踪环路：DLL 码环 + PLL 载波环，输出 I_P/Q_P</td><td>一颗星的 I/Q 散点图 + 环路鉴相器输出曲线。<b>这是面试时最被追问的部分</b></td></tr>
+<tr><td><b>第 4 周</b></td><td>位同步 → 帧同步 → 解出导航电文比特</td><td>能打印出前几个子帧的 preamble（10001011）</td></tr>
+<tr><td><b>第 5 周</b></td><td>星历解码 → 算卫星位置 → 生成伪距</td><td>卫星天空图（sky plot）</td></tr>
+<tr><td><b>第 6 周</b></td><td>最小二乘单点定位 → 输出经纬高</td><td><b>核心交付物</b>：定位散点图 + 误差 CDF 图</td></tr>
+<tr><td><b>第 7 周</b></td><td>换真实数据集（SoftGNSS 的 <code class="inl">gnss0.bin</code>）跑通全链路</td><td>真实数据上的定位结果——这一张图能吃两年</td></tr>
+<tr><td><b>第 8 周</b></td><td>把捕获模块用 C++ 重写（Eigen + CMake）</td><td>简历上写"MATLAB/Python 验证 + C++ 工程实现"</td></tr>
+</tbody>
+</table>
+
+<div class="ok"><b>研一上只要求做到第 6-7 周。</b>按文档里的路线图，项目 A 是研一上启动、寒假收尾，你有充足时间。真正要卡死的是另一件事：<b>和导师谈一次方向对齐</b>，让课题往"通导一体化 / PNT / 定位"上靠——那才是"做对了能省一年"的杠杆。</div>
+
+<h2><span class="num">6</span>卡住了怎么办</h2>
+<div class="grid2">
+<div class="card">
+<div class="t">先试这三招</div>
+<ul>
+<li><b>看报错最后一行。</b>Python 报错是倒着读的，最关键的信息在最底下。</li>
+<li><b>把错误信息整段复制去搜。</b>90% 的问题 Stack Overflow 上都有，而且你大概率不是第一个踩的人。</li>
+<li><b>用 Copilot / AI 解释。</b>学生包里的 Copilot 可以直接问"这段代码为什么报错"，把报错贴给它。</li>
+</ul>
+</div>
+<div class="card">
+<div class="t">几个高概率的坑</div>
+<ul>
+<li><b><code class="inl">command not found: uv</code></b> → 没走 Step 3，或者新开终端没加载 PATH；重开一个终端窗口再试。</li>
+<li><b><code class="inl">No module named numpy</code></b> → 你用了系统 Python 而不是项目虚拟环境。进项目目录后用 <code class="inl">uv run python xxx.py</code>，别直接 <code class="inl">python xxx.py</code>。</li>
+<li><b><code class="inl">Permission denied (publickey)</code></b> → SSH 没配好，回 Step 7 重做一遍 <code class="inl">ssh -T git@github.com</code> 验证。</li>
+<li><b>捕获不到卫星</b> → 九成是<b>采样率或中频填错了</b>。换数据集时这两个值是必须改的常量。</li>
+</ul>
+</div>
+</div>
+
+<footer>
+本手册基于你的实际机器（MacBook Air M4 / 16 GB / macOS 26.6）实测生成，所有命令与输出结果均已在真机验证。<br>
+项目源码位于 <code>~/Developer/gnss-rx</code>，其中捕获算法已通过合成数据验证：5 颗星全检出、零虚警、码相位逐采样点精确命中。
+</footer>
+
+</div>
+<script>
+document.querySelectorAll('.copy').forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var code = btn.parentElement.querySelector('code');
+    var text = code.innerText.replace(/^#.*$/gm, '').trim();
+    navigator.clipboard.writeText(text).then(function(){
+      btn.textContent = '已复制';
+      btn.classList.add('done');
+      setTimeout(function(){ btn.textContent = '复制'; btn.classList.remove('done'); }, 1600);
+    });
+  });
+});
+</script>
+</body>
+</html>

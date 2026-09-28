@@ -1,0 +1,20 @@
+[project]
+name = "gnssrx"
+version = "0.1.0"
+description = "从零实现的 GPS L1 软件接收机 —— 求职项目 A"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+notebook = ["jupyterlab>=4.0"]
+
+[tool.uv]
+package = false          # 这是脚本型项目，不做 pip 安装；靠 sys.path 引入 src/
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
