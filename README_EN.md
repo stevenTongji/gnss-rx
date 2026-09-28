@@ -20,7 +20,7 @@ Design principle: **all stages share one data chain and one repository**, with e
 | Base | IF signal simulation / I/O | `src/gnssrx/sim.py`, `io_if.py` | ✅ |
 | ① Acquisition | Parallel code-phase FFT + squaring-loop fine Doppler | `src/gnssrx/acquisition.py` | ✅ |
 | ② Tracking | DLL + PLL + carrier aiding | `src/gnssrx/tracking.py` | ✅ |
-| ③ Sync | Bit sync, frame sync, navigation message | `src/gnssrx/nav_msg.py` | ⬜ |
+| ③ Sync | Bit sync, frame sync, navigation message | `src/gnssrx/nav_msg.py` | ✅ |
 | ④ Ephemeris | Ephemeris decoding, satellite position | `src/gnssrx/ephemeris.py` | ⬜ |
 | ⑤ PVT | Pseudorange + least-squares positioning | `src/gnssrx/pvt.py` | ⬜ |
 | ⑥ C++ port | Core modules with Eigen + CMake | `cpp/` | ⬜ |
@@ -56,10 +56,27 @@ The same code runs on the public **Nottingham GPS L1 dataset** (1-bit, fs 5.456 
 | Strongest C/N₀ | 47.2 dB-Hz (PRN 30) |
 | Constellation | navigation message ±1 transitions clearly visible |
 
-Two data-specific traps, documented in `scripts/02_real_data_test.py`:
+Two data-specific traps, documented in `scripts/02_real_data_test.py`, `scripts/03_real_data_test.py`:
 
 - **Bandpass-sampling aliasing**: the analog IF (4.092 MHz) exceeds fs/2, so the digital IF becomes 1.364 MHz and the Doppler sign flips.
 - **Bit packing order** of the 1-bit data: LSB-first for this dataset; a wrong order reduces the correlation peak to about a quarter.
+
+### Navigation message sync (bit sync → frame sync)
+
+On 30 s of real signal, all three satellites synchronize:
+
+| Metric | Result |
+|---|---|
+| Bit sync | Two independent methods **agree exactly**, 1 ms resolution |
+| Transition confidence | 11.5–20.0 (uniform would be 1; 92% of bit transitions fall on one residue) |
+| Frame sync | **5 subframes** per satellite, spaced exactly 300 bits = 6.000 s |
+| Subframe start times | 4.6 / 10.6 / 16.6 / 22.6 / 28.6 s (identical across satellites) |
+
+Requiring an exact 300-bit spacing is a very hard constraint — a random 8-bit match has
+probability 1/128, and hitting that repeatedly at exactly 300-bit intervals is essentially
+impossible, so this simultaneously validates acquisition, tracking and bit sync.
+
+![Navigation message sync](docs/figures/nav_msg.png)
 
 ## Quick start
 
@@ -70,6 +87,8 @@ uv sync                                      # requires Python >= 3.11
 
 uv run python scripts/00_smoke_test.py       # acquisition check
 uv run python scripts/01_tracking_test.py    # tracking check (~4 s)
+uv run python scripts/02_real_data_test.py   # real-signal check (needs data)
+uv run python scripts/03_nav_msg_test.py     # nav message sync (needs data)
 ```
 
 ## Implementation notes

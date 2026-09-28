@@ -47,7 +47,8 @@ def acquire_prn(
 ) -> dict:
     """对单颗卫星做捕获，返回最佳（多普勒, 码相位）及其置信度指标。"""
     spc = int(round(fs / 1e3))
-    x = np.asarray(data, dtype=np.float64)
+    # 只转换真正要用的那一段。整段 int8 → float64 会把几十秒的数据撑到 GB 级。
+    x = np.asarray(data[: spc * ms], dtype=np.float64)
     if x.size < spc * ms:
         raise ValueError(f"数据不足：需要 {spc * ms} 点，实际 {x.size} 点")
 

@@ -56,7 +56,9 @@ def read_1bit_i(path: str | Path, n_samples: int = -1, offset_samples: int = 0,
     bits = np.unpackbits(raw, bitorder="big" if msb_first else "little")
     if n_samples >= 0:
         bits = bits[:n_samples]
-    return bits.astype(np.float64) * 2.0 - 1.0
+    # 返回 int8 而不是 float64：30 秒 5.456 MHz 的数据有 1.6 亿个采样点，
+    # 用 float64 存是 1.3 GB，int8 只有 164 MB。运算时会按需提升精度。
+    return (bits.astype(np.int8) * 2 - 1).astype(np.int8)
 
 
 def probe(path: str | Path, fs: float) -> dict:
