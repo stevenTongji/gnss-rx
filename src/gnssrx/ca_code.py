@@ -15,6 +15,7 @@ import numpy as np
 
 CODE_LENGTH = 1023          # C/A 码一个周期的码片数
 CODE_RATE_HZ = 1.023e6      # 码速率 (chip/s)，周期恰为 1 ms
+L1_HZ = 1575.42e6           # GPS L1 载波频率；码多普勒由它换算（见 tracking.py 的载波辅助）
 
 # PRN 1..32 的 G2 相位选择抽头（1-based，IS-GPS-200 表 3-Ia）
 G2_TAPS: dict[int, tuple[int, int]] = {

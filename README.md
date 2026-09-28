@@ -28,9 +28,9 @@
 | 模块 | 文件 | 状态 |
 |---|---|---|
 | C/A 码生成 | `src/gnssrx/ca_code.py` | ✅ 完成（含 GPS 三值特性自检） |
-| 中频合成 / 读写 | `src/gnssrx/sim.py`、`io_if.py` | ✅ 完成 |
-| 并行码相位 FFT 捕获 | `src/gnssrx/acquisition.py` | ✅ 完成（32 星搜索 0.15 s） |
-| 跟踪环路 DLL + PLL | `src/gnssrx/tracking.py` | ⬜ 待做 |
+| 中频合成 / 读写 | `src/gnssrx/sim.py`、`io_if.py` | ✅ 完成（含导航电文 + 码多普勒） |
+| 并行码相位 FFT 捕获 | `src/gnssrx/acquisition.py` | ✅ 完成（32 星搜索 + 平方环精频估计） |
+| 跟踪环路 DLL + PLL | `src/gnssrx/tracking.py` | ✅ 完成（含载波辅助，5 星 1 s 全锁定） |
 | 位同步 / 帧同步 | `src/gnssrx/nav_msg.py` | ⬜ 待做 |
 | 星历解码 | `src/gnssrx/ephemeris.py` | ⬜ 待做 |
 | 伪距 + 最小二乘定位 | `src/gnssrx/pvt.py` | ⬜ 待做 |
@@ -40,9 +40,21 @@
 
 ```bash
 cd ~/Developer/gnss-rx
-uv sync                             # 安装依赖
-uv run python scripts/00_smoke_test.py   # 冒烟测试：环境 + 算法自检
+uv sync                                    # 安装依赖
+uv run python scripts/00_smoke_test.py     # 冒烟测试：环境 + C/A码 + 捕获
+uv run python scripts/01_tracking_test.py  # 跟踪环路验证（用真值逐项打分）
 ```
+
+## 跟踪环路实测指标（合成数据，真值已知，C/N0 = 45 dB-Hz）
+
+| 指标 | 结果 |
+|---|---|
+| 多普勒残差 | **0.0 Hz**（精频估计后） |
+| C/N0 估计 | 44.6 dB-Hz，绝对误差 **-0.37 dB** |
+| 载波鉴相器抖动 | 8.2°~10.8°（理论测量噪声底约 7.2°） |
+| 平滑后真实相位抖动 | **1.31°**（理论 1.6°） |
+| 码环锁定保持（1 s，码漂 2 码片） | \|I_P\| 保持 103%~125% |
+| 关闭载波辅助（对照实验） | C/N0 掉到 25.4 dB-Hz，证明码环在扛活 |
 
 ## 关键参数（改数据时要同步改）
 

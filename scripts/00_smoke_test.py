@@ -53,7 +53,9 @@ def main() -> int:
               f"多普勒 {t['doppler_hz']:>+8.1f} Hz")
 
     print("\n④ 对 32 个 PRN 做并行码相位捕获")
-    results = acquire_all(sig, FS, F_IF, ms=1,
+    # ms=5 是 5 ms 非相干累积。只用 1 ms 的话峰/次峰比余量太薄（约 1.2 倍），
+    # 45 dB-Hz 下偶尔会漏检；5 ms 可把余量提到 4 倍以上。
+    results = acquire_all(sig, FS, F_IF, ms=5,
                           doppler_half_range=6000, doppler_step=500)
     found = detect(results, threshold=2.5)
     found_prns = sorted(r["prn"] for r in found)
