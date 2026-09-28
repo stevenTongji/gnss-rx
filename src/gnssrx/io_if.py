@@ -37,6 +37,28 @@ def write_real_int8(path: str | Path, samples: np.ndarray, scale: float = 32.0) 
     q.tofile(str(path))
 
 
+def read_1bit_i(path: str | Path, n_samples: int = -1, offset_samples: int = 0,
+                msb_first: bool = True) -> np.ndarray:
+    """读取 1-bit 量化的实数中频采样（每个字节打包 8 个采样点，每点 1 bit）。
+
+    1-bit 量化会带来约 2 dB 信噪比损失，但对捕获/跟踪影响很小 —— 早期采集卡
+    与不少公开数据集（如 Nottingham GPS 数据集）都是这个格式。
+
+    msb_first 决定一个字节内 8 个点的排列顺序，两种都要试：排错了序列会乱、
+    相关峰出不来。整体极性反了则无所谓（只是 I/Q 反号，相关值取模后一样）。
+    """
+    byte_offset = offset_samples // 8
+    if n_samples < 0:
+        raw = np.fromfile(str(path), dtype=np.uint8, offset=byte_offset)
+    else:
+        raw = np.fromfile(str(path), dtype=np.uint8,
+                          count=(n_samples + 7) // 8, offset=byte_offset)
+    bits = np.unpackbits(raw, bitorder="big" if msb_first else "little")
+    if n_samples >= 0:
+        bits = bits[:n_samples]
+    return bits.astype(np.float64) * 2.0 - 1.0
+
+
 def probe(path: str | Path, fs: float) -> dict:
     """快速体检一个数据文件：时长、幅度、频谱峰值位置（用来确认 IF 设对没有）。"""
     data = read_real_int8(path)

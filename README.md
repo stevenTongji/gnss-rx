@@ -46,6 +46,24 @@
 
 ![捕获结果](docs/figures/acquisition.png)
 
+## 真实信号验证
+
+在公开的 **Nottingham GPS L1 采集数据集**（1-bit，fs 5.456 MHz）上运行同一套代码：
+
+![真实信号验证](docs/figures/real_data.png)
+
+| 指标 | 结果 |
+|---|---|
+| 检出卫星数 | 10 颗（32 个 PRN 全搜） |
+| 稳定锁定 | **9 / 10** |
+| 最强卫星 C/N₀ | 47.2 dB-Hz（PRN 30） |
+| 星座图 | 清晰可见导航电文的 ±1 跳变 |
+
+值得一提的两个坑，都写在 `scripts/02_real_data_test.py` 注释里：
+
+- **欠采样混叠**：模拟中频 4.092 MHz 高于 fs/2，混叠后的数字中频是 1.364 MHz，且多普勒符号相反
+- **1-bit 数据的字节内比特序**：该数据集是 LSB 优先，排错的话相关峰会掉到 1/4
+
 ## 数据集
 
 | 数据 | 来源 | 用途 |
@@ -67,8 +85,9 @@ gnss-rx/
 │   ├── tracking.py      # DLL + PLL 二阶环路 + 载波辅助
 │   └── plotting.py      # 作图公共配置
 ├── scripts/
-│   ├── 00_smoke_test.py     # 环境 + C/A 码 + 捕获验证
-│   └── 01_tracking_test.py  # 跟踪环路验证（真值对照）
+│   ├── 00_smoke_test.py       # 环境 + C/A 码 + 捕获验证
+│   ├── 01_tracking_test.py    # 跟踪环路验证（真值对照）
+│   └── 02_real_data_test.py   # 真实 GPS L1 信号验证
 ├── docs/figures/        # 结果图
 └── data/                # 数据目录（*.bin 不入库）
 ```
@@ -82,6 +101,7 @@ uv sync                                      # 安装依赖（需 Python ≥ 3.1
 
 uv run python scripts/00_smoke_test.py       # 捕获验证
 uv run python scripts/01_tracking_test.py    # 跟踪验证（约 4 秒）
+uv run python scripts/02_real_data_test.py   # 真实信号验证（需先下载数据，见 data/README.md）
 ```
 
 ## 算法说明

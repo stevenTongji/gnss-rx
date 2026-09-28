@@ -43,6 +43,24 @@ confirming the code loop genuinely tracks code Doppler instead of relying on the
 
 ![Acquisition results](docs/figures/acquisition.png)
 
+## Real-signal validation
+
+The same code runs on the public **Nottingham GPS L1 dataset** (1-bit, fs 5.456 MHz):
+
+![Real-signal validation](docs/figures/real_data.png)
+
+| Metric | Result |
+|---|---|
+| Satellites detected | 10 (full 32-PRN search) |
+| Stable locks | **9 / 10** |
+| Strongest C/N₀ | 47.2 dB-Hz (PRN 30) |
+| Constellation | navigation message ±1 transitions clearly visible |
+
+Two data-specific traps, documented in `scripts/02_real_data_test.py`:
+
+- **Bandpass-sampling aliasing**: the analog IF (4.092 MHz) exceeds fs/2, so the digital IF becomes 1.364 MHz and the Doppler sign flips.
+- **Bit packing order** of the 1-bit data: LSB-first for this dataset; a wrong order reduces the correlation peak to about a quarter.
+
 ## Quick start
 
 ```bash
