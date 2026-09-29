@@ -255,15 +255,34 @@ GNSS-SDR's default thresholds:
 
 | Configuration | per-epoch 2D / 3D | bias 2D / 3D | DRMS | CEP | SEP |
 |---|---|---|---|---|---|
-| baseline (no atmospheric correction) | 4.09 / 4.31 m | 4.08 / 4.15 m | 4.51 | 3.16 | 3.59 |
-| + ionosphere Klobuchar | 4.05 / 5.99 m | 4.04 / 5.91 m | 4.46 | 3.11 | 5.26 |
-| + ionosphere + troposphere | 6.51 / 32.39 m | 6.51 / 32.38 m | 7.15 | 4.22 | 21.56 |
-| **+ ionosphere + 15° elevation cutoff** (standard config) | **2.68 / 3.56 m** | **2.61 / 3.43 m** | 3.02 | 2.42 | 3.60 |
+| baseline (no atmospheric correction) | 4.06 / 4.16 m | 4.05 / 4.14 m | 4.45 | 3.26 | 3.41 |
+| + ionosphere Klobuchar | 4.01 / 5.94 m | 4.01 / 5.93 m | 4.41 | 3.20 | 5.29 |
+| + ionosphere + troposphere | 6.41 / 32.41 m | 6.40 / 32.41 m | 7.02 | 4.15 | 21.51 |
+| **+ ionosphere + 15° elevation cutoff** (standard config) | **2.24 / 2.94 m** | **2.22 / 2.91 m** | 2.46 | 1.83 | 2.69 |
 
-Verdict (thresholds 2D ≤ 2 m, 3D ≤ 5 m, CEP ≤ 2 m, SEP ≤ 10 m): 3D bias 3.43 m ✅, SEP 3.60 ✅;
-**2D bias 2.61 m and CEP 2.42 m slightly exceed the 2.0 m threshold** ❌ — reported honestly, not
-polished. The remainder is mainly code-phase measurement noise (pseudorange residuals ≈ ±2.5 m and
-elevation-dependent); carrier smoothing or a narrower DLL bandwidth is the next step.
+Verdict (thresholds 2D ≤ 2 m, 3D ≤ 5 m, CEP ≤ 2 m, SEP ≤ 10 m):
+**3D bias 2.91 m ✅, CEP 1.83 m ✅, SEP 2.69 m ✅**;
+**2D bias 2.22 m slightly exceeds 2.0 m** ❌ — reported honestly, not polished.
+
+**Measured sweep of the DLL noise bandwidth** (static scenario; only
+`TrackingConfig.dll_bandwidth_hz` changes):
+
+| DLL bandwidth | 2D bias | CEP | note |
+|---|---|---|---|
+| 2.0 Hz (old default) | 2.61 m | 2.42 m | noisy |
+| 1.0 Hz | 2.36 m | 2.02 m | |
+| **0.5 Hz (current default)** | **2.22 m** | **1.83 m** | **measured optimum** |
+| 0.3 Hz | 2.70 m | 2.27 m | degrading |
+| 0.2 Hz | 3.14 m | 2.70 m | loop cannot follow code Doppler (steady-state lag) |
+
+Narrower than 0.5 Hz gets *worse*: the steady-state lag starts to outweigh the noise reduction. PLL
+bandwidth (15 / 25 / 40 Hz) barely matters — with carrier aiding on, code-phase accuracy is not
+limited by the carrier loop.
+
+The remaining ~2.2 m is a **systematic bias**: going 2.0 Hz → 0.5 Hz should have cut random noise by
+√4 = 2×, but the error only dropped 15%, so most of it is not random. Pseudorange residuals correlate
+with elevation (positive at high elevation, negative at low); carrier smoothing (Hatch) is the next
+step for the noise part, with this bias item to be investigated separately.
 
 Two side effects worth noting:
 

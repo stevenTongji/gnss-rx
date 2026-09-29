@@ -88,8 +88,30 @@ N_CHANNELS = 12
 THRESHOLD = 2.0
 SETTLE_MS = 500
 PDI_MS = 1
-TRACK_CACHE = ROOT / "data" / "processed" / "sim_tracking.pkl"
-MEAS_CACHE = ROOT / "data" / "processed" / "sim_epochs.pkl"
+
+# 码环噪声带宽。默认 0.5 Hz 是实测的最优点（静态场景）：
+#   2.0 Hz → 2D 2.61 / CEP 2.42 m；1.0 Hz → 2.36 / 2.02；**0.5 Hz → 2.22 / 1.83**；
+#   0.3 Hz → 2.70 / 2.27；0.2 Hz → 3.14 / 2.70（**更窄反而变差**：环跟不上码多普勒的
+#   稳态滞后）。载波环带宽（15/25/40 Hz）实测几乎无影响，说明开了载波辅助后
+#   码相位精度并不受载波环牵制。
+# 用 --dll-bw=X 覆盖做对照；缓存文件名带参数，避免不同档互相污染。
+DLL_BW_HZ = 0.5
+
+
+def _opt_float(name: str, default: float) -> float:
+    for a in sys.argv:
+        if a.startswith(f"--{name}="):
+            return float(a.split("=", 1)[1])
+    return default
+
+
+DLL_BW_HZ = _opt_float("dll-bw", DLL_BW_HZ)
+# 载波环带宽与牵引时长也做成可调：码环开了载波辅助后，码相位精度其实受载波环牵制。
+PLL_BW_HZ = _opt_float("pll-bw", 25.0)
+SETTLE_MS = int(_opt_float("settle", SETTLE_MS))
+_TAG = (f"b{DLL_BW_HZ:g}p{PLL_BW_HZ:g}s{SETTLE_MS}").replace(".", "p")
+TRACK_CACHE = ROOT / "data" / "processed" / f"sim_tracking_{_TAG}.pkl"
+MEAS_CACHE = ROOT / "data" / "processed" / f"sim_epochs_{_TAG}.pkl"
 
 # GNSS-SDR position_test 的默认阈值
 TH_2D_M = 2.0
@@ -179,7 +201,7 @@ def get_tracking(regen: bool = False) -> dict:
         with open(TRACK_CACHE, "rb") as f:
             return pickle.load(f)                                     # type: ignore
 
-    print("③ 捕获 + 闭环跟踪")
+    print(f"③ 捕获 + 闭环跟踪（码环噪声带宽 {DLL_BW_HZ:g} Hz）")
     data = read_real_int8(REAL_DAT)
     n_ms = int(data.size / (FS / 1e3))
     print(f"   读入 {data.size} 采样点（{data.size/FS:.1f} 秒，8-bit 实数）")
@@ -192,13 +214,16 @@ def get_tracking(regen: bool = False) -> dict:
             data, FS, F_IF, a["prn"],
             code_phase_samples=a["code_phase_samples"],
             coarse_doppler_hz=a["doppler_hz"])
-    results = track_all(data, FS, F_IF, found, n_ms=n_ms, cfg=TrackingConfig())
+    cfg = TrackingConfig(dll_bandwidth_hz=DLL_BW_HZ,
+                         pll_bandwidth_hz=PLL_BW_HZ)
+    results = track_all(data, FS, F_IF, found, n_ms=n_ms, cfg=cfg)
     track: dict[int, dict] = {}
     for r in results:
         cn0 = float(r.cn0_dbhz(1e-3, SETTLE_MS))
         print(f"   PRN {r.prn:>2}  C/N₀ {cn0:>5.1f} dB-Hz")
         track[r.prn] = {"ip": np.asarray(r.ip, dtype=float),
                         "tau": np.asarray(r.code_phase_samples, dtype=float),
+                        "doppler": np.asarray(r.doppler_hz, dtype=float),
                         "cn0": cn0}
     TRACK_CACHE.parent.mkdir(parents=True, exist_ok=True)
     with open(TRACK_CACHE, "wb") as f:
