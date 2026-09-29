@@ -21,8 +21,8 @@ Design principle: **all stages share one data chain and one repository**, with e
 | ① Acquisition | Parallel code-phase FFT + squaring-loop fine Doppler | `src/gnssrx/acquisition.py` | ✅ |
 | ② Tracking | DLL + PLL + carrier aiding | `src/gnssrx/tracking.py` | ✅ |
 | ③ Sync | Bit sync, frame sync, navigation message | `src/gnssrx/nav_msg.py` | ✅ |
-| ④ Ephemeris | Ephemeris decoding, satellite position | `src/gnssrx/ephemeris.py` | ⬜ |
-| ⑤ PVT | Pseudorange + least-squares positioning | `src/gnssrx/pvt.py` | ⬜ |
+| ④ Ephemeris | Ephemeris decoding, satellite position (Sagnac / relativistic) | `src/gnssrx/ephemeris.py` | ✅ |
+| ⑤ PVT | Pseudorange + least-squares SPS (≥4 sats) + 3-sat earth constraint | `src/gnssrx/pvt.py` | ✅ |
 | ⑥ C++ port | Core modules with Eigen + CMake | `cpp/` | ⬜ |
 
 ## Verified results
@@ -78,6 +78,50 @@ impossible, so this simultaneously validates acquisition, tracking and bit sync.
 
 ![Navigation message sync](docs/figures/nav_msg.png)
 
+### Single-point positioning (PVT: real data + synthetic validation)
+
+**Real data (SiGe GN3S v3, 8-bit, fs 16.368 MHz)**: the full chain — acquisition → 30 s tracking
+→ ephemeris decode → pseudorange → weighted least squares — runs end to end. After fixing the parity
+bug (below), this dataset (ION GNSS SDR metadata-standard sample, collected 2013-05-23) yields
+**7 clean satellites** (PRN 1/7/8/9/11/17/28, C/N₀ 45–50 dB-Hz), which meets the full-SPS (≥4 sats)
+requirement; the Nottingham 1-bit dataset likewise yields **9 clean satellites**
+(`scripts/14_nottingham_pvt.py`).
+
+> **Parity bug fixed (`ephemeris.py::strip_parity`)**: the IS-GPS-200 parity rule is
+> `d_i = r_i ⊕ D30*(prev word)`, where D30\* is the *received* bit (including the Costas inversion c),
+> so correctly `d_i = r_i ⊕ r_prevD30` (the c cancels). The old code wrote `data ^ D30* ^ c`, which is
+> right for the first word but adds a spurious `c` on every later word: c=0 channels happened to be
+> correct while c=1 channels were fully inverted → a "garbage orbit". With 1-bit data dominated by c=1,
+> many real satellites were mislabelled as C/A cross-correlation ghosts. Fixing it restored SiGe from
+> 3 → **7** and Nottingham from 2 → **9** clean satellites.
+
+> **Two sign bugs fixed** — the key to going from "hundreds of km" to metre level, both pinned down by
+> the synthetic self-check `scripts/15_timing_selfcheck.py`:
+> (1) **code-phase sign**: `t_user = m_blk/1000 − τ/1.023e6` (was `+`); this tracker's τ has the
+> opposite sign to the code-epoch offset within the block; and
+> (2) **satellite-clock sign**: `pseudorange = c(t_user − t_sat) + c·δt_sat` (was `−`), since
+> `c(t_user − t_sat) = ρ + c·b − c·δt_sat`.
+> Before the fix Nottingham was ~298 km off; after it, the 9-satellite real-data fix lands at
+> **52.93°N / 1.17°W / h ≈ 0** with **±2 m residuals**, i.e. **1.96 km** from the published collection
+> point — metre-level real-data positioning.
+
+**Synthetic 4-sat validation (`scripts/13_synthetic_4sat_pvt.py`, known truth)**: because the real
+dataset has only 3 sats, a known-truth scenario exercises the full path (true range → injected
+integer-millisecond ambiguity → `build_measurement` → least squares) to prove the engine correct:
+
+| Scenario | Position error | Note |
+|---|---|---|
+| 6 sats, no ambiguity, direct WLS | **0.024 m** | solver math correct |
+| 6 sats + injected common ms ambiguity (K=434579) | **0.024 m** | integer-ms disambiguation correct (GPS-week scale) |
+| 4-sat subset | **0.024 m** | full SPS correct |
+| code-phase noise σ = 2 / 5 / 10 m | 6.3 / 15.8 / 31.5 m | error ≈ σ·GDOP, as predicted |
+| 3 sats + earth constraint | ~11 km | two-point ambiguity — motivates ≥4 sats |
+
+**Fix**: the GPS week number is only 10 bits in the message (WN mod 1024), rolling over every 1024
+weeks. This data decodes 717 but the true extended week is 1741 (2013); `ephemeris.py` now restores it
+to the nearest 1024-multiple of a reference week. (The rollover does not affect satellite position,
+which depends only on the within-week tk, but the corrected date is now consistent.)
+
 ## Quick start
 
 ```bash
@@ -89,6 +133,10 @@ uv run python scripts/00_smoke_test.py       # acquisition check
 uv run python scripts/01_tracking_test.py    # tracking check (~4 s)
 uv run python scripts/02_real_data_test.py   # real-signal check (needs data)
 uv run python scripts/03_nav_msg_test.py     # nav message sync (needs data)
+uv run python scripts/13_synthetic_4sat_pvt.py  # synthetic 4-sat PVT verification (known truth)
+uv run python scripts/15_timing_selfcheck.py # timing self-check (synthetic, pins the sign bugs)
+uv run python scripts/07_sige_pvt_test.py    # real-data PVT on SiGe (needs data)
+uv run python scripts/14_nottingham_pvt.py   # real-data PVT on Nottingham (needs data)
 ```
 
 ## Implementation notes

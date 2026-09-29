@@ -31,6 +31,41 @@ def read_iq_int8(path: str | Path, n_samples: int = -1,
     return iq[:, 0] + 1j * iq[:, 1]
 
 
+def iq_to_real_int8(path_in: str | Path, path_out: str | Path,
+                    fs: float, f_if: float,
+                    n_samples: int = -1,
+                    chunk_pairs: int = 2_000_000,
+                    scale: float = 32.0) -> int:
+    """把 I/Q 文件（8-bit 交替、双补码）转换成「实数 IF」int8 文件，复用实数链路。
+
+    HackRF 这类 I/Q 样本：复数基带 s[n]=I[n]+jQ[n] 已平移到 IF=f_if 处。
+    还原成实数通带：real_if[n] = I[n]·cos(2π·f_if·n/fs) − Q[n]·sin(2π·f_if·n/fs)，
+    量化回 int8 写入 path_out。全程分块，避免把整份大文件读进内存。
+
+    返回写入的采样点数量（实数 IF 样本数 == 原始 I/Q 对数）。
+    """
+    import os
+    total = os.path.getsize(str(path_in)) // 2          # 每对 I/Q = 2 字节
+    if n_samples > 0:
+        total = min(total, n_samples)
+    done = 0
+    with open(str(path_in), "rb") as fin, open(str(path_out), "wb") as fout:
+        while done < total:
+            cnt = min(chunk_pairs, total - done)
+            raw = np.fromfile(fin, dtype=np.int8, count=cnt * 2)
+            if raw.size == 0:
+                break
+            iq = raw.reshape(-1, 2).astype(np.float64)
+            I, Q = iq[:, 0], iq[:, 1]
+            n = np.arange(done, done + cnt)
+            ph = 2.0 * np.pi * f_if * n / fs
+            real_if = I * np.cos(ph) - Q * np.sin(ph)
+            q = np.clip(np.round(real_if * scale), -128, 127).astype(np.int8)
+            q.tofile(fout)
+            done += cnt
+    return done
+
+
 def write_real_int8(path: str | Path, samples: np.ndarray, scale: float = 32.0) -> None:
     """把浮点信号量化成 8-bit 实数写入文件，模仿真实采集卡的输出。"""
     q = np.clip(np.round(samples * scale), -128, 127).astype(np.int8)

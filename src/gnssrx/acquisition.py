@@ -111,6 +111,40 @@ def detect(results: list[dict], threshold: float = 2.5) -> list[dict]:
     return [r for r in results if r["peak_ratio"] >= threshold]
 
 
+def dedupe_detections(dets: list[dict], fs: float,
+                      phase_tol_chips: float = 2.0,
+                      doppler_tol_hz: float = 500.0) -> list[dict]:
+    """剔除同一颗真实卫星的多次 PRN 检测（C/A 码互相关造成的假峰）。
+
+    GPS C/A 码之间并非完全正交，强信号会在其它 PRN 的相关图上也顶出高于门限的
+    峰，只是出现在**不同的码相位**上。于是同一颗真实卫星可能被 2 个（甚至更多）
+    PRN 号在各自的相关峰处都检测到；若不处理，跟踪环会把同一信号解调两遍，
+    既浪费资源，也会让后续的伪距/PVT 最小二乘出现秩亏。
+
+    做法：按峰值/次峰比从高到低排序后贪心聚类，聚类键是「码相位（采样点）+
+    多普勒」。同一簇（相位差 < phase_tol_chips、多普勒差 < doppler_tol_hz）视为
+    同一颗星，只保留峰值比最高的那一棵 PRN——也就是码相位真正对齐、相关性最强
+    的那次检测。
+    """
+    spc = int(round(fs / 1e3))
+    phase_tol_samples = phase_tol_chips * fs / CODE_RATE_HZ
+    srt = sorted(dets, key=lambda d: -d.get("peak_ratio", 0.0))
+    clusters: list[list[dict]] = []
+    for d in srt:
+        placed = False
+        for cl in clusters:
+            rep = cl[0]
+            dp = abs(((d["code_phase_samples"] - rep["code_phase_samples"]) + spc / 2) % spc - spc / 2)
+            df = abs(d["doppler_hz"] - rep["doppler_hz"])
+            if dp <= phase_tol_samples and df <= doppler_tol_hz:
+                cl.append(d)
+                placed = True
+                break
+        if not placed:
+            clusters.append([d])
+    return [cl[0] for cl in clusters]
+
+
 def refine_doppler(
     data: np.ndarray,
     fs: float,
