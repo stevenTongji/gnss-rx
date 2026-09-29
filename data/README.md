@@ -27,9 +27,15 @@ curl -L -o nottingham_gps_l1_1bit.bin \
   -H "Accept: application/vnd.github.v3.raw"
 ```
 
-- 约 55.8 MB，1-bit 量化（每字节 8 个采样点），**字节内 LSB 优先**
+- 约 55.8 MB（约 77 秒），1-bit 量化（每字节 8 个采样点），**字节内 LSB 优先**
 - 原始来源：jks.com/gps/gps.html（Nottingham GPS 数据集），
-  本链接转自 [JiaoXianjun/GNSS-GPS-SDR](https://github.com/JiaoXianjun/GNSS-GPS-SDR)
+  本链接转自 [JiaoXianjun/GNSS-GPS-SDR](https://github.com/JiaoXianjun/GNSS-GPS-SDR)；
+  更上游是 Michele Bavaro 的 GPS 博客（2010 年，原链接已失效）
+- ⚠️ **这份数据没有公布天线的精确坐标**。随包的官方说明原文只有一句：
+  「if your decoding works you should get **a lat/lon position in Nottingham, UK**」
+  —— 只承诺"在英国的诺丁汉"。因此本仓库做 PVT 校验时**不能拿它当位置真值**，
+  只能核验"结果是否落在诺丁汉"；对精度的验证改用不依赖外部参考点的自校验
+  （残差 × PDOP 的形式精度、卫星子集一致性），见 `scripts/17_rtklib_comparison.py`。
 - 1-bit 量化损失约 2 dB 信噪比，但对捕获/跟踪影响很小
 - **欠采样注意**：模拟中频 4.092 MHz 高于 fs/2，混叠后数字中频为 1.364 MHz，
   且多普勒符号与真实值相反（详见 `scripts/02_real_data_test.py` 的注释）

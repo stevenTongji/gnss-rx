@@ -21,7 +21,10 @@
     uv run python scripts/14_nottingham_pvt.py          # 复用缓存
     uv run python scripts/14_nottingham_pvt.py --regen  # 重新捕获/跟踪/定位
 
-真值（公开采集点，用于对照而非作为定位输入）：Nottingham ~52.95°N, 1.15°W。
+位置参照：⚠️ 这份数据集的官方说明只承诺「a lat/lon position in Nottingham, UK」，
+**从未公布天线坐标**。下面用诺丁汉市中心 (52.9536°N, 1.1505°W) 仅作"是否落在诺丁汉"
+的量级参照，**不能当作位置真值**；精度验证请看 scripts/17_rtklib_comparison.py
+（残差×PDOP 的形式精度、以及卫星子集一致性）。
 """
 from __future__ import annotations
 
@@ -55,8 +58,8 @@ PDI_MS = 1                 # 与 TrackingConfig 默认一致（20 块/比特）
 CACHE = ROOT / "data" / "processed" / "nottingham_pvt_measurements.pkl"
 TRACK_CACHE = ROOT / "data" / "processed" / "nottingham_tracking.pkl"
 
-# 公开采集点（仅作对照，/不作为定位输入/）
-NOTTINGHAM_TRUTH = (52.95, -1.15, 0.0)
+# 诺丁汉市中心（城市级参照点；⚠️ 非天线坐标，该数据集未公布天线位置）
+NOTTINGHAM_TRUTH = (52.9536, -1.1505, 0.0)
 
 
 def unwrap_code_phase(tau_stream: np.ndarray, fs: float, pdi_ms: int) -> np.ndarray:
@@ -259,7 +262,7 @@ def main() -> int:
           f"(= {sol['clock_bias']/1e3:.1f} km)")
     print(f"   GDOP = {sol['gdop']:.2f}")
     print(f"   LLH: 纬度={lat:.6f}°  经度={lon:.6f}°  高程={h:.1f} m")
-    print(f"   与公开采集点 (52.95°N, 1.15°W) 距离 = {err:.2f} km")
+    print(f"   与诺丁汉市中心参照点 (52.9536°N, 1.1505°W) 距离 = {err:.2f} km")
     print(f"   各星伪距残差 (m):")
     for m, res in zip(meas, sol["residuals"]):
         print(f"     PRN {m['prn']:>2}: {res:+.2f}")
@@ -267,7 +270,7 @@ def main() -> int:
     print("\n" + "=" * 78)
     if sol["converged"] and sol["n_sat"] >= 4:
         print(f"✅ PVT 定位成功（真实数据，{len(meas)} 星完整 SPS）。"
-              f"与公开采集点偏差 {err:.2f} km（含码相位噪声/参考点精度，属正常量级）。")
+              f"结果落在诺丁汉市内（距市中心参照点 {err:.2f} km；该参照点并非天线坐标）。")
         rc = 0
     else:
         print("❌ PVT 未收敛。")

@@ -47,33 +47,40 @@ def satellite_clock_correction(eph, t_sat: float) -> float:
     return C_LIGHT * (dtc + dt_rel)
 
 
-def _ecef_from_subframe_transmit(eph, t_sat: float) -> np.ndarray:
+def _ecef_from_subframe_transmit(eph, t_sat: float,
+                                 recv_nominal: np.ndarray | None = None
+                                 ) -> np.ndarray:
     """发射时刻的卫星 ECEF 坐标（含地球自转 Sagnac 修正）。
 
-    1. 用 tk = t_sat − toe 算出"发射时"的卫星位置（惯性系视角下的轨道平面坐标）。
-    2. 信号飞行 ~Δt ≈ ρ/c，期间地球转过 θ = OMEGA_E·Δt，把卫星坐标反方向
-       旋转回去，得到发射瞬间卫星相对接收机处 ECEF 的真实位置。
+    信号飞行时间 τ = ρ/c 期间地球转过 θ = ω·τ，因此
+        s_ECEF(接收时刻) = R_z(−θ) · s_ECEF(发射时刻)
+    等价于 RTKLIB `geodist()` 里的距离修正 +ω·(sx·ry − sy·rx)/c（二者一阶等价，
+    `scripts/17` 有数值对照）。
+
+    注意 τ 必须用**接收机到卫星的斜距**（2.0–2.6 万 km），而不是卫星的地心距
+    （2.66 万 km）——后者会把 θ 高估约 30%，在低仰角卫星上带来最多约 10 m 的
+    距离误差。这里在缺少接收机位置时用「卫星星下点的地表点」作标称接收机。
     """
     tk = t_sat - eph.toes
-    # 先猜一个大致距离做 Sagnac（首次迭代用标称 2.66e7 m）
-    rho_approx = 2.66e7
-    for _ in range(2):
+    pos = np.asarray(eph.position(tk), dtype=float)
+    if recv_nominal is None:
+        rn = float(np.linalg.norm(pos))
+        recv_nominal = pos / rn * R_EARTH if rn > 1.0 else np.array([0.0, 0.0, R_EARTH])
+    recv_nominal = np.asarray(recv_nominal, dtype=float)
+    rho_approx = float(np.linalg.norm(pos - recv_nominal))
+    for _ in range(3):
         theta = OMEGA_E * (rho_approx / C_LIGHT)
-        # 在发射时刻的位置（先按 tk 算，再绕 Z 轴转 -theta 回到接收 ECEF）
-        pos_inertial = np.asarray(eph.position(tk), dtype=float)
-        # 发射时卫星在 ECEF 下应再被地球自转"追上" theta，即接收机 ECEF 看过去要
-        # 把卫星位置从 ECI 转到 ECEF：绕 Z 轴 +theta
         cos_t, sin_t = np.cos(theta), np.sin(theta)
         rot = np.array([[cos_t, sin_t, 0.0],
                         [-sin_t, cos_t, 0.0],
                         [0.0, 0.0, 1.0]])
-        pos_ecef = rot @ pos_inertial
-        rho_approx = float(np.linalg.norm(pos_ecef))
+        pos_ecef = rot @ pos
+        rho_approx = float(np.linalg.norm(pos_ecef - recv_nominal))
     return pos_ecef
 
 
 def build_measurement(eph, prn: int, tow_seconds: float, t_user_seconds: float,
-                      fs: float) -> dict:
+                      fs: float, recv_nominal: np.ndarray | None = None) -> dict:
     """由单颗卫星的（星历 + TOW + 接收机时刻）组装一个伪距观测。
 
     参数
@@ -92,7 +99,7 @@ def build_measurement(eph, prn: int, tow_seconds: float, t_user_seconds: float,
     # 发射时刻 ≈ 该子帧起始（TLM 前导）：TOW 指向下一子帧，故本子帧起始 = TOW − 6
     t_sat = tow_seconds - 6.0
 
-    sat_ecef = _ecef_from_subframe_transmit(eph, t_sat)
+    sat_ecef = _ecef_from_subframe_transmit(eph, t_sat, recv_nominal)
     sat_clock_m = satellite_clock_correction(eph, t_sat)
     # 卫星钟差符号（关键）：c(t_user − t_sat) = ρ_true + c·b − c·δt_sat，
     # 故「已钟差改正的伪距」(= ρ_true + c·b) = c(t_user − t_sat) + c·δt_sat。
@@ -138,6 +145,7 @@ def solve_robust(measurements: list[dict],
                 init: np.ndarray | None = None,
                 earth_constraint: bool = False,
                 p0: np.ndarray | None = None,
+                weight_elevation: bool = False,
                 max_iter: int = 20,
                 ambig_iter: int = 4) -> dict:
     """先消除整数毫秒模糊度再迭代最小二乘定位（3 星静态定位必需）。
@@ -155,7 +163,8 @@ def solve_robust(measurements: list[dict],
     for _ in range(ambig_iter):
         meas = resolve_ms_ambiguity(measurements, p)
         sol = solve(meas, init=init if init is not None else p,
-                    earth_constraint=earth_constraint, max_iter=max_iter)
+                    earth_constraint=earth_constraint,
+                    weight_elevation=weight_elevation, max_iter=max_iter)
         if not sol["converged"]:
             break
         p = sol["pos"]
@@ -251,12 +260,16 @@ def _solve_3sat_spherical(sats: list[np.ndarray], rho: np.ndarray,
 def solve(measurements: list[dict],
           init: np.ndarray | None = None,
           earth_constraint: bool = False,
+          weight_elevation: bool = False,
           max_iter: int = 20) -> dict:
     """迭代加权最小二乘定位。
 
     measurements : build_measurement 返回的列表，每颗星一个。
     init          : [x,y,z] 初猜（米，ECEF）。
     earth_constraint : True 且恰好 3 颗星时，走球面参数化求解（接收机固定在地球表面）。
+    weight_elevation : True 时按仰角加权 w = sin²(el)（等价 σ ∝ 1/sin el，
+                     RTKLIB `weight()` 的常用形式）——低仰角卫星受大气延迟与多径
+                     影响大，理应降权。
 
     返回 dict：{pos, clock_bias, residuals, n_sat, iter, converged, gdop}
     """
@@ -280,6 +293,19 @@ def solve(measurements: list[dict],
 
     w_earth = 1.0 if (earth_constraint and n >= 4) else 0.0
 
+    def _elev_weights(recv_now: np.ndarray) -> np.ndarray:
+        la_, lo_, _ = ecef_to_llh(recv_now)
+        la_, lo_ = np.radians(la_), np.radians(lo_)
+        u_ = np.array([np.cos(la_) * np.cos(lo_), np.cos(la_) * np.sin(lo_),
+                       np.sin(la_)])
+        out = []
+        for s in sats:
+            d = s - recv_now
+            rng = float(np.linalg.norm(d))
+            el = np.arcsin(max(-1.0, min(1.0, float(d @ u_) / rng)))
+            out.append(max(np.sin(el) ** 2, 1e-4))       # 防止仰角≈0 处权重为 0
+        return np.array(out)
+
     converged = False
     for it in range(max_iter):
         G = _geo_matrix(sats, recv)
@@ -288,7 +314,7 @@ def solve(measurements: list[dict],
 
         rows = [G]
         rside = [resid]
-        weights = [np.ones(n)]
+        weights = [_elev_weights(recv) if weight_elevation else np.ones(n)]
         if w_earth > 0.0:
             rng = float(np.linalg.norm(recv))
             if rng < 1.0:

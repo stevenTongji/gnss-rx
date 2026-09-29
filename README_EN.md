@@ -82,19 +82,34 @@ impossible, so this simultaneously validates acquisition, tracking and bit sync.
 
 **Real data (Nottingham 1-bit, fs 5.456 MHz)**: the full chain — acquisition → 48 s tracking →
 ephemeris decode → pseudorange → weighted least squares — runs end to end with **9 clean satellites**
-(PRN 30/29/31/1/21/5/13/23/16) for a full SPS fix: **52.93°N / 1.17°W / h ≈ 0**, i.e. **1.96 km** from
-the published collection point, with **±2 m** pseudorange residuals.
-(The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28); it was collected in
-Munich, Germany (48.1715°N / 11.8087°E) and its PVT residual is ~±40 km (≈0.1 ms). The parity check
-confirms its subframes have 0 failures, so the residual is on the measurement/data side — this
-dataset's inherent level; see `scripts/07_sige_pvt_test.py`. Nottingham reaches metre level.)
+(PRN 30/29/31/1/21/5/13/23/16) for a full SPS fix: **52.9349°N / 1.1650°W**, per-satellite
+pseudorange residual **RMS 1.4 m**.
+
+> **About "accuracy"**: this dataset **never published the antenna coordinates** — its official
+> description only promises "if your decoding works you should get **a lat/lon position in
+> Nottingham, UK**". Our solution is indeed inside Nottingham (≈2.3 km from the city-centre
+> coordinate 52.9536°N/1.1505°W), but the city centre is a *city-level* reference, and the other
+> candidate (IGS station NOTT, 52.95°N/−1.2°W) is itself only given to two decimals (±0.5 km).
+> **So "2 km from the reference" measures how good the reference is, not how good we are.** The
+> verifiable accuracy evidence is instead:
+> ① formal precision (residual × PDOP) ≈ **3.2 m**;
+> ② splitting the 9 satellites into **two disjoint halves and solving each independently, the two
+> horizontal solutions differ by 9.4 m** (different geometry; any per-satellite systematic error
+> would push them apart).
+>
+> (The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28) and was collected in
+> Munich, Germany (48.1715°N/11.8087°E) — a coordinate **explicitly given by the ION metadata**, so
+> its 21.8 km *is* a real error; the parity check confirms its subframes have 0 failures, so the
+> residual is on the measurement/data side — this dataset's inherent level;
+> see `scripts/07_sige_pvt_test.py`.)
 
 ![PVT positioning result](docs/figures/pvt_result.png)
 
-Left: the fix is 1.96 km from the published collection point (rings at 0.5/1/2 km); middle: per-satellite
-pseudorange residuals, RMS 1.42 m; right: sky plot of the 9 satellites — most sit at low elevation
-(poor single-point geometry), yet the fix is still metre-level. All three panels are reproduced from
-cache by `scripts/16_results_figures.py`.
+Left: the fix is 2.29 km from the city-centre reference (rings at 0.5/1/2 km; that reference is not
+the antenna position); middle: per-satellite pseudorange residuals, RMS 1.42 m; right: sky plot of the
+9 satellites (azimuth/elevation, colour = C/N₀) — mostly low elevation, i.e. mediocre geometry, yet
+the residuals are metre level. All three panels are reproduced from cache by
+`scripts/16_results_figures.py`.
 
 > **Parity bug fixed (`ephemeris.py::strip_parity`)**: the IS-GPS-200 parity rule is
 > `d_i = r_i ⊕ D30*(prev word)`, where D30\* is the *received* bit (including the Costas inversion c),
@@ -119,8 +134,8 @@ is "disambiguate the integer millisecond using the candidate point (per-satellit
 the residuals". Because the cross-satellite differences of `ρ_raw` contain exact integer-millisecond
 steps (±k·c ms), the rounding cancels them **exactly**: the cost is ~0 only at the true position and
 jumps elsewhere. Coarse search (1°) → fine search → iterated least squares. On Nottingham the solver
-reaches 52.93491°N / 1.16503°W (1.96 km from the collection point) **with no prior whatsoever** —
-identical to the prior-aided result.
+reaches 52.93491°N / 1.16494°W **with no prior whatsoever** — identical (within <10 m) to the
+prior-aided result.
 
 ![Cold-start cost terrain](docs/figures/pvt_coldstart.png)
 
@@ -135,17 +150,53 @@ integer-millisecond ambiguity → `build_measurement` → least squares) to prov
 
 | Scenario | Position error | Note |
 |---|---|---|
-| 6 sats, no ambiguity, direct WLS | **0.010 m** | solver math correct |
-| 6 sats + injected common ms ambiguity (K=434579) | **0.010 m** | integer-ms disambiguation correct (GPS-week scale) |
-| 4-sat subset | **0.010 m** | full SPS correct |
-| code-phase noise σ = 2 / 5 / 10 m | 6.31 / 15.77 / 31.53 m | error ≈ σ·GDOP, as predicted |
-| 3 sats + earth constraint | ~11.5 km | two-point ambiguity — motivates ≥4 sats |
+| 6 sats, no ambiguity, direct WLS | **0.015 m** | solver math correct |
+| 6 sats + injected common ms ambiguity (K=434579) | **0.015 m** | integer-ms disambiguation correct (GPS-week scale) |
+| 4-sat subset | **0.013 m** | full SPS correct |
+| code-phase noise σ = 2 / 5 / 10 m | 6.29 / 15.74 / 31.50 m | error ≈ σ·GDOP, as predicted |
+| 3 sats + earth constraint | 11.45 km | two-point ambiguity — motivates ≥4 sats |
 
 ![Positioning accuracy ladder](docs/figures/pvt_accuracy.png)
 
-The full accuracy ladder, from synthetic truth (cm) to real data (m / km level). SiGe and Nottingham run
-**the same code**: Nottingham reaches 1.96 km while SiGe sits at 21.8 km — the gap comes from each
-dataset's own measurement consistency (the parity check confirms neither has bit errors in its subframes).
+The accuracy ladder. The first 6 rows are "difference from known truth"; because Nottingham **never
+published its antenna coordinates**, it is represented by two self-check metrics that need no external
+reference (subset consistency 9.4 m, formal precision 3.2 m); the grey row is merely "distance to the
+city centre" and **is not an error**. SiGe's truth comes from the ION metadata (trustworthy), so its
+21.8 km is a genuine error — the gap between the two datasets comes from their own measurement
+consistency (the parity check confirms neither has bit errors in its subframes).
+
+### Comparison with a reference implementation (RTKLIB)
+
+`scripts/17_rtklib_comparison.py` ports RTKLIB's `eph2pos()` / `eph2clk()` / `geodist()` **from the C
+source as an independent implementation**, compares it item by item with ours, and quantifies every
+correction we do not apply:
+
+| Item | RTKLIB | Ours | Impact |
+|---|---|---|---|
+| Satellite position `eph2pos` | `tk=t−toe`, `Ω=Ω₀+(Ω̇−ωₑ)tk−ωₑ·toe` | same | **difference 0.000 mm** (line-by-line identical) |
+| Satellite clock `eph2clk` | `f₀+f₁t+f₂t²` + relativity | same (t already the transmit time) | **difference 0.000 mm** |
+| Sagnac | range correction `+ω(sx·ry−sy·rx)/c` | coordinate rotation `R_z(−ωρ/c)` | agree to **0.06 mm** (first-order equivalent); term is **±20 m** |
+| Troposphere | `tropmodel` (Saastamoinen) | added in `atmosphere.py` | height **−11 m**, horizontal 8.9 m, residual 1.42→2.37 m |
+| Ionosphere | `ionmodel` (Klobuchar, coeffs from SF4 page 18) | **coefficients unavailable** (that page is broadcast by PRN 18, absent here) | with nominal coeffs: height −3.7 m more, horizontal 2.6 m |
+| Elevation weighting | `σ ∝ 1/sin(el)` | added (`solve(weight_elevation=True)`) | sub-metre |
+| τ uses slant range | — | previously used the geocentric radius (26,560 km) as ρ | up to **3.0 m** range error ← **fixed** |
+
+![Impact of the atmospheric/weighting corrections](docs/figures/pvt_corrections.png)
+
+Two conclusions:
+
+1. **Geometry and clock agree exactly with RTKLIB**; the two Sagnac formulations are first-order
+   equivalent (0.06 mm). What was genuinely missing is the **atmospheric correction and weighting** —
+   with them the height drops from 101.2 m to 87 m, which is within 6 m of the **expected ellipsoidal
+   height 93 m** derived independently from "orthometric 46 m + geoid undulation ≈47 m". That is a
+   vertical self-check needing no horizontal reference.
+2. **All the corrections together move the horizontal position by only ~10 m** (residual 1.42 → 2.9 m).
+   In other words: **nothing RTKLIB does that we skipped can possibly explain those 2 km.**
+
+A lesson along the way: when porting Klobuchar I wrote the degree → semicircle factor as `1/π`
+(RTKLIB divides by π only because its inputs are radians), which clamped `φᵢ` and produced an absurd
+−215 km delay, blowing the solution to −313 km height. Exactly why a reference implementation to
+compare against matters — a unit error like that is invisible when you only compare against yourself.
 
 **Fix**: the GPS week number is only 10 bits in the message (WN mod 1024), rolling over every 1024
 weeks. This data decodes 717 but the true extended week is 1741 (2013); `ephemeris.py` now restores it
@@ -168,6 +219,7 @@ uv run python scripts/15_timing_selfcheck.py # timing self-check (synthetic, pin
 uv run python scripts/07_sige_pvt_test.py    # real-data PVT on SiGe (needs data)
 uv run python scripts/14_nottingham_pvt.py   # real-data PVT on Nottingham (needs data)
 uv run python scripts/16_results_figures.py  # regenerate the result figures in docs/figures/
+uv run python scripts/17_rtklib_comparison.py # item-by-item comparison with RTKLIB
 ```
 
 ## Implementation notes

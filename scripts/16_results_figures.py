@@ -34,7 +34,8 @@ FIGDIR = ROOT / "docs" / "figures"
 
 # 公开采集点（仅作对照，不作为定位输入）
 TRUTH = {
-    "nottingham": ("Nottingham", 52.95, -1.15, 0.0),
+    # ⚠️ 数据集从未公布天线坐标；此点为「诺丁汉市中心」参考点，仅作量级参照。
+    "nottingham": ("Nottingham", 52.9536, -1.1505, 0.0),
     "sige": ("慕尼黑", 48.17154012, 11.80868949, 576.86),
 }
 # SiGe 的整数毫秒消模糊需要一个 ~150 km 内的先验（该数据集量测一致性有限，
@@ -43,11 +44,11 @@ SIGE_PRIOR = (48.17154012, 11.80868949)
 
 # 合成数据实测结果（取自 `scripts/13_synthetic_4sat_pvt.py` 的标准输出，可复现）
 SYNTHETIC = [
-    ("合成：6 星，无噪声", 0.010, "#2e9e5b"),
-    ("合成：4 星（完整 SPS）", 0.010, "#2e9e5b"),
-    ("合成：码相位噪声 σ=2 m", 6.312, "#c9a227"),
-    ("合成：码相位噪声 σ=5 m", 15.767, "#d97b28"),
-    ("合成：码相位噪声 σ=10 m", 31.525, "#d9534f"),
+    ("合成：6 星，无噪声", 0.015, "#2e9e5b"),
+    ("合成：4 星（完整 SPS）", 0.013, "#2e9e5b"),
+    ("合成：码相位噪声 σ=2 m", 6.290, "#c9a227"),
+    ("合成：码相位噪声 σ=5 m", 15.744, "#d97b28"),
+    ("合成：码相位噪声 σ=10 m", 31.502, "#d9534f"),
 ]
 
 
@@ -80,6 +81,27 @@ def enu_of(recv: np.ndarray, lat0: float, lon0: float, target: np.ndarray):
 def load(name: str):
     with open(PROC / name, "rb") as f:
         return pickle.load(f)
+
+
+def subset_consistency_m(meas, pos) -> float:
+    """按仰角把卫星分成两组、各自独立定位，返回两解的水平距离（米）。
+
+    这是**不依赖任何外部参考点**的自一致性检验：两组卫星几何不同，若量测里存在
+    逐星系统误差（错误 t_sat、错误的整数毫秒、错锁等），两组会解出不同的位置。
+    """
+    P = np.asarray(pos, float)
+    lat, lon, _ = ecef_to_llh(P)
+    la, lo = np.radians(lat), np.radians(lon)
+    up = np.array([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)])
+    info = []
+    for m in meas:
+        d = np.asarray(m["sat_ecef"], float) - P
+        info.append((float(d @ up) / float(np.linalg.norm(d)), m))
+    info.sort(key=lambda x: -x[0])
+    half = len(info) // 2
+    s1 = solve_robust([m for _, m in info[:half]], p0=P, init=P)
+    s2 = solve_robust([m for _, m in info[half:]], p0=P, init=P)
+    return great_circle_km(np.asarray(s1["pos"]), np.asarray(s2["pos"])) * 1e3
 
 
 def load_cn0() -> dict[int, float]:
@@ -116,7 +138,7 @@ def fig_result(nott, cn0) -> None:
         ax.text(r * 0.707, r * 0.707 + 0.04, f"{r:g} km", fontsize=7.6,
                 color="#8a94a6", ha="left", va="bottom", alpha=0.95)
     ax.plot(0, 0, marker="*", ms=20, color="#1f6feb",
-            label=f"公开采集点 ({tlat:.2f}°, {abs(tlon):.2f}°W)")
+            label=f"诺丁汉市中心参考点 ({tlat:.2f}°, {abs(tlon):.2f}°W)")
     se, sn, _ = enu_of(sol["pos"], lat, lon, truth)       # 真值相对解算点
     ax.plot(-se / 1e3, -sn / 1e3, marker="o", ms=8, color="#d9534f",
             label="本接收机解算点（冷启动）")
@@ -220,7 +242,7 @@ def fig_coldstart(nott) -> None:
     ax.plot(lons[jo], lats[jl], marker="s", ms=11, mfc="none", mec="#ff4d4d",
             mew=2.0, label=f"全局最小格点 {z[jl, jo]:.1f} km")
     ax.plot(tlon, tlat, marker="*", ms=17, color="#ffd166", mec="#222", mew=0.5,
-            label=f"公开采集点 ({tlat:.2f}°, {abs(tlon):.2f}°W)")
+            label=f"诺丁汉市中心参考点 ({tlat:.2f}°, {abs(tlon):.2f}°W)")
     ax.annotate(f"中位代价 {np.median(z):.0f} km", xy=(-150, -40),
                 fontsize=9, color="#f0f0f0")
     ax.set_xlim(-180, 180); ax.set_ylim(-60, 70)
@@ -232,7 +254,7 @@ def fig_coldstart(nott) -> None:
     cb.set_label("代价 (km，对数)", fontsize=8.5)
     cb.ax.tick_params(labelsize=8)
 
-    # ---- (b) 采集点附近放大（0.02° ≈ 2 km 网格）：锥形极小值 + 饱和平台
+    # ---- (b) 参考点附近放大（0.02° ≈ 2 km 网格）：锥形极小值 + 饱和平台
     lats2 = np.arange(50.4, 55.6, 0.02)
     lons2 = np.arange(-5.2, 3.0, 0.02)
     z2 = cost_km(lats2, lons2)
@@ -245,10 +267,10 @@ def fig_coldstart(nott) -> None:
     ax.plot(lon, lat, marker="o", ms=10, mfc="none", mec="#ff4d4d", mew=2.2,
             label="解算点（网格极小值）")
     ax.plot(tlon, tlat, marker="*", ms=18, color="#ffd166", mec="#222", mew=0.5,
-            label="公开采集点")
+            label="市中心参考点")
     ax.set_xlabel("经度 (°)"); ax.set_ylabel("纬度 (°)")
-    ax.set_title("(b) 采集点附近放大（0.02° ≈ 2 km 网格）\n"
-                 f"解算点与采集点相距 "
+    ax.set_title("(b) 参考点附近放大（0.02° ≈ 2 km 网格）\n"
+                 f"解算点与市中心参考点相距 "
                  f"{great_circle_km(sol['pos'], llh_to_ecef(tlat, tlon, 0.0)):.2f} km",
                  fontsize=10.5)
     ax.legend(fontsize=8.4, loc="upper left", framealpha=0.92)
@@ -273,6 +295,10 @@ def fig_accuracy(nott, sige) -> None:
     ln, on, _ = ecef_to_llh(sol_n["pos"])
     _, tln, ton, thn = TRUTH["nottingham"]
     err_n = great_circle_km(sol_n["pos"], llh_to_ecef(tln, ton, thn))
+    # 可核验的精度指标（不依赖外部参考点）：
+    res_n = np.array(sol_n["residuals"], float)
+    formal_n = float(np.sqrt((res_n ** 2).mean()) * sol_n["gdop"])   # 形式精度
+    subset_n = subset_consistency_m(nott, sol_n["pos"])             # 两组子集一致性
 
     prior = llh_to_ecef(*SIGE_PRIOR)
     sol_s = solve_robust(sige, p0=prior, init=prior, earth_constraint=False)
@@ -281,15 +307,17 @@ def fig_accuracy(nott, sige) -> None:
     err_s = great_circle_km(sol_s["pos"], llh_to_ecef(tls, tos, ths))
 
     rows = list(SYNTHETIC) + [
-        ("合成：3 星 + 地球约束（固有歧义）", 11450.0, "#bfa14a"),
-        ("真实：Nottingham（1-bit，9 星）", err_n * 1e3, "#1f6feb"),
-        ("真实：SiGe GN3S（8-bit，7 星）", err_s * 1e3, "#8e44ad"),
+        ("合成：3 星 + 地球约束（固有歧义）", 11449.96, "#bfa14a"),
+        ("真实 Nottingham：两组独立子集水平一致性", subset_n, "#1f6feb"),
+        ("真实 Nottingham：形式精度（残差 × PDOP）", formal_n, "#4dabf7"),
+        ("真实 SiGe：距元数据真值（慕尼黑，坐标已公布）", err_s * 1e3, "#8e44ad"),
+        ("参照：Nottingham 至市中心（该参考点非天线坐标）", err_n * 1e3, "#adb5bd"),
     ]
     labels = [r[0] for r in rows]
     vals = np.array([r[1] for r in rows], float)
     colors = [r[2] for r in rows]
 
-    fig, ax = plt.subplots(figsize=(11.6, 5.6), dpi=130)
+    fig, ax = plt.subplots(figsize=(12.8, 6.4), dpi=130)
     y = np.arange(len(rows))[::-1]
     ax.barh(y, vals, color=colors, height=0.66)
     for yi, v in zip(y, vals):
@@ -304,7 +332,7 @@ def fig_accuracy(nott, sige) -> None:
             ha="left", va="center")
     ax.text(1.06e3, len(rows) - 0.42, "1 km", fontsize=8.8, color="#8a94a6",
             ha="left", va="center")
-    ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=9.5)
+    ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=8.8)
     ax.set_xlabel("位置误差 (m，对数轴)")
     ax.set_title("定位精度阶梯：合成真值（厘米级）→ 真实数据（米 / 公里级）",
                  fontsize=12)
@@ -312,9 +340,10 @@ def fig_accuracy(nott, sige) -> None:
     ax.set_axisbelow(True)
     fig.tight_layout(rect=(0, 0.045, 1, 1))
     fig.text(0.012, 0.012,
-             "合成数据取自 scripts/13_synthetic_4sat_pvt.py（可复现）；"
-             "真实数据取自 scripts/14_nottingham_pvt.py、scripts/07_sige_pvt_test.py",
-             fontsize=7.8, color="#6b7280")
+             "前 6 项为「与已知真值之差」；Nottingham 的 9 星数据从未公布天线坐标，"
+             "故改用两项不依赖外部参考点的自校验指标；"
+             "灰条仅为参照（市中心坐标非天线位置）。脚本：13 / 14 / 07 / 16",
+             fontsize=7.6, color="#6b7280")
     out = FIGDIR / "pvt_accuracy.png"
     fig.savefig(out); plt.close(fig)
     print(f"  已保存 {out.name}  Nottingham={err_n:.2f} km  SiGe={err_s:.2f} km")
