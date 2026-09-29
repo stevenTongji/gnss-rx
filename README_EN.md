@@ -255,16 +255,52 @@ GNSS-SDR's default thresholds:
 
 | Configuration | per-epoch 2D / 3D | bias 2D / 3D | DRMS | CEP | SEP |
 |---|---|---|---|---|---|
-| baseline (no atmospheric correction) | 4.06 / 4.16 m | 4.05 / 4.14 m | 4.45 | 3.26 | 3.41 |
-| + ionosphere Klobuchar | 4.01 / 5.94 m | 4.01 / 5.93 m | 4.41 | 3.20 | 5.29 |
-| + ionosphere + troposphere | 6.41 / 32.41 m | 6.40 / 32.41 m | 7.02 | 4.15 | 21.51 |
-| **+ ionosphere + 15° elevation cutoff** (standard config) | **2.24 / 2.94 m** | **2.22 / 2.91 m** | 2.46 | 1.83 | 2.69 |
+| baseline (no atmospheric correction) | 1.66 / 2.30 m | 1.65 / 2.26 m | 1.85 | 1.52 | 2.19 |
+| + ionosphere Klobuchar | 1.59 / 5.32 m | 1.58 / 5.31 m | 1.77 | 1.47 | 4.10 |
+| + ionosphere + troposphere | 3.48 / 32.67 m | 3.47 / 32.66 m | 3.83 | 2.38 | 20.29 |
+| **+ ionosphere + 15° elevation cutoff** (standard config) | **0.59 / 2.69 m** | **0.54 / 2.67 m** | 0.70 | 0.52 | 1.91 |
 
-Verdict (thresholds 2D ≤ 2 m, 3D ≤ 5 m, CEP ≤ 2 m, SEP ≤ 10 m):
-**3D bias 2.91 m ✅, CEP 1.83 m ✅, SEP 2.69 m ✅**;
-**2D bias 2.22 m slightly exceeds 2.0 m** ❌ — reported honestly, not polished.
+Verdict (thresholds 2D ≤ 2 m, 3D ≤ 5 m, CEP ≤ 2 m, SEP ≤ 10 m): **all four pass ✅**
+(2D bias 0.54 m, 3D 2.67 m, CEP 0.52 m, SEP 1.91 m). The horizontal solution is sub-metre;
+the remaining 2.6 m is mostly **height** (σU 2.9 m), because this satellite set has weak
+vertical geometry.
 
-**Measured sweep of the DLL noise bandwidth** (static scenario; only
+### Root cause: the Sagnac correction's "nominal receiver"
+
+The drop from 2.2 m to 0.54 m came from a **design flaw found only by elimination**.
+
+The Sagnac correction needs θ = ω·ρ/c, where ρ is the receiver–satellite slant range — but
+on the first fix **we do not yet know where the receiver is**. The original implementation
+fell back to "the surface point directly below the satellite" as a nominal receiver. That can
+be a thousand kilometres from the true receiver, so θ is wrong and every satellite carries a
+**fixed** metre-level pseudorange bias (measured std ≈ 3 m).
+
+How it was localised (each hypothesis tested and eliminated):
+
+| Test | Method | Result |
+|---|---|---|
+| noise or systematic? | per-satellite residual spread over 6 epochs | inter-epoch σ only 0.2–0.8 m vs ±4.8 m mean → **fixed per-satellite bias** |
+| tracking or geometry? | per-satellite residual at 2.0 Hz vs 0.5 Hz loops | correlation **+0.996** → independent of tracking, a **deterministic modelling error** |
+| resolution? | sampling 5.456 → 10 MHz (5.33 → 9.78 samples/chip) | essentially unchanged → eliminated |
+| ephemeris/clock? | item-by-item vs the RINEX nav file | position diff = Sagnac rotation (expected), clock diff ≤ 0.14 m → eliminated |
+| code-phase anchor? | instantaneous code phase vs unwrapped accumulation | 0.000 m apart → eliminated |
+
+Finally, recomputing the true geometric range with **the simulator's own algorithm**
+(`satpos(receive time) → velocity-extrapolate back to transmit → R_z(−ωτ)`) showed our range
+differed by **std 1.9 m**, matching the per-satellite residuals one for one — root cause confirmed.
+
+**Fix** — do what a real receiver does: **iterate**.
+
+```python
+coarse = solve_series(epochs, ...)      # (1) coarse fix (Sagnac can only use the sub-satellite point)
+epochs = refine_epochs(epochs, coarse)  # (2) recompute satellite positions from the coarse fix
+base   = solve_series(epochs, ...)      # (3) final solve
+```
+
+⚠️ The same defect exists in `scripts/07` (SiGe) and `scripts/14` (Nottingham): their
+`build_measurement` calls likewise omit `recv_nominal` and need the same iteration.
+
+**Measured sweep of the DLL noise bandwidth** (taken before the fix; static scenario, only
 `TrackingConfig.dll_bandwidth_hz` changes):
 
 | DLL bandwidth | 2D bias | CEP | note |

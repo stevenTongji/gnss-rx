@@ -109,7 +109,19 @@ DLL_BW_HZ = _opt_float("dll-bw", DLL_BW_HZ)
 # 载波环带宽与牵引时长也做成可调：码环开了载波辅助后，码相位精度其实受载波环牵制。
 PLL_BW_HZ = _opt_float("pll-bw", 25.0)
 SETTLE_MS = int(_opt_float("settle", SETTLE_MS))
-_TAG = (f"b{DLL_BW_HZ:g}p{PLL_BW_HZ:g}s{SETTLE_MS}").replace(".", "p")
+# 采样率与数字中频也可调（--fs / --if）：用来做「码相位分辨率」实验 ——
+# 5.456 MHz 只有 5.33 采样点/码片，提高采样率可检验相关器量化是不是精度瓶颈。
+FS = _opt_float("fs", FS)
+F_IF = _opt_float("if", F_IF)
+# 默认档（5.456 MHz / 1.364 MHz）保持与既有缓存同名，避免白白重跑；
+# 只有改了采样率或中频才加后缀。
+_TAG = f"b{DLL_BW_HZ:g}p{PLL_BW_HZ:g}s{SETTLE_MS}"
+if abs(FS - 5.456e6) > 1.0 or abs(F_IF - 1.364e6) > 1.0:
+    _TAG += f"f{FS/1e6:g}i{F_IF/1e6:g}"
+_TAG = _TAG.replace(".", "p")
+_FS_SUF = "" if abs(FS - 5.456e6) < 1.0 else f"_{FS/1e6:g}MHz"
+IQ_RAW = ROOT / "data" / "raw" / "sim" / f"gpssim_iq8{_FS_SUF}.bin"
+REAL_DAT = ROOT / "data" / "raw" / "sim" / f"gpssim_real8{_FS_SUF}.dat"
 TRACK_CACHE = ROOT / "data" / "processed" / f"sim_tracking_{_TAG}.pkl"
 MEAS_CACHE = ROOT / "data" / "processed" / f"sim_epochs_{_TAG}.pkl"
 
@@ -265,6 +277,9 @@ def build_epochs(track: dict) -> list[tuple[float, list[dict]]]:
             t_user = m_block / 1000.0 - u[m_block] / 1.023e6
             m = build_measurement(eph, prn, tow, t_user, FS)
             m["tow"] = tow
+            # 留着用于「按解算位置迭代重算卫星位置」（见 refine_epochs）
+            m["_eph"] = eph
+            m["_t_user"] = t_user
             table[tow] = m
         per_prn[prn] = table
         print(f"   PRN {prn:>2}  ✅ 解出星历，{len(table)} 个子帧历元")
@@ -325,6 +340,29 @@ def solve_series(epochs, alpha, beta, use_iono: bool, use_tropo: bool,
         positions.append(np.asarray(sol["pos"], float))
         prev = positions[-1]
     return positions
+
+
+def refine_epochs(epochs, positions: list[np.ndarray]) -> list[tuple]:
+    """用**已解出的接收机位置**重算卫星位置，消除 Sagnac 标称接收机带来的偏差。
+
+    `build_measurement` 的 Sagnac 修正需要知道接收机大致在哪（θ = ω·ρ/c，ρ 是斜距）。
+    首次只能拿「卫星星下点的地表点」当标称值，与真实接收机可差上千公里 → 每颗星
+    **固定**的米级偏差（实测贡献约 0.5 m，且每星固定、与仰角相关）。
+    真实接收机也是这么做的：先粗定位，再用粗位置重算卫星位置，迭代一两次即收敛。
+    """
+    out = []
+    for (tow, meas), pos in zip(epochs, positions):
+        if pos is None or not meas or "_eph" not in meas[0]:
+            out.append((tow, meas))
+            continue
+        fixed = [build_measurement(m["_eph"], m["prn"], m["tow"], m["_t_user"],
+                                   FS, recv_nominal=pos) for m in meas]
+        for old, new in zip(meas, fixed):
+            new["tow"] = old["tow"]
+            new["_eph"] = old["_eph"]
+            new["_t_user"] = old["_t_user"]
+        out.append((tow, fixed))
+    return out
 
 
 def filter_by_elevation(epochs, cut_deg: float,
@@ -404,11 +442,15 @@ def main() -> int:
     print(f"   RINEX nav 里的 Klobuchar 系数（仿真器用的就是它）："
           f" α={tuple(round(float(x), 12) for x in (alpha or ())[:2])}…")
 
+    stale = True
     if MEAS_CACHE.exists() and not regen:
         with open(MEAS_CACHE, "rb") as f:
             epochs = pickle.load(f)                                   # type: ignore
-        print("③ 复用缓存的解码结果")
-    else:
+        # 旧缓存没有 _eph（迭代重算需要），视为过期重建（只重解码，不重跟踪）
+        stale = bool(epochs) and "_eph" not in epochs[0][1][0]
+        if not stale:
+            print("③ 复用缓存的解码结果")
+    if stale:
         track = get_tracking(regen)
         epochs = build_epochs(track)
         MEAS_CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -420,6 +462,10 @@ def main() -> int:
         return 1
 
     print("\n④ 逐历元定位（第一历元冷启动，无先验；后续用上一历元解作先验）")
+    # ④-a 粗定位：Sagnac 的标称接收机只能先用「卫星星下点的地表点」
+    coarse = solve_series(epochs, alpha, beta, False, False, None)
+    # ④-b 用粗定位结果重算卫星位置（消除上述标称带来的每星固定偏差），再正式求解
+    epochs = refine_epochs(epochs, coarse)
     base = solve_series(epochs, alpha, beta, False, False, None)
     iono = solve_series(epochs, alpha, beta, True, False, base)
     both = solve_series(epochs, alpha, beta, True, True, base)
