@@ -115,6 +115,12 @@ TOW 结构性推出（`SFID = (TOW/6 mod 5)`，TOW=0→5），不依赖 HOW 内�
 48.1715°N/11.8087°E；其 PVT 残差约 ±40 km（≈0.1 ms）——奇偶校验确认其子帧 0 失败、星历无比特错误，
 故该残余来自量测/数据侧，属该数据集固有水平；见 `scripts/07_sige_pvt_test.py`。Nottingham 则达米级。）
 
+![PVT 定位结果](docs/figures/pvt_result.png)
+
+左：解算点与公开采集点相距 1.96 km（同心圈为 0.5/1/2 km）；中：9 颗星各自的伪距残差，
+RMS 1.42 m；右：参与定位的 9 颗卫星的天空图（绝大部分位于低仰角，正是单点定位几何较差的体现，
+但仍给出米级结果）。三张子图均由 `scripts/16_results_figures.py` 从缓存复现。
+
 > **两个符号 bug（本轮定位精度从"数百 km"降到"米级"的关键）**，均由合成自检脚本
 > `scripts/15_timing_selfcheck.py` 严格定位（该脚本用已知码相位/已知子帧时刻的合成信号，
 > 逐项核对 `t_user` 与真实到达时刻之差）：
@@ -131,16 +137,28 @@ TOW 结构性推出（`SFID = (TOW/6 mod 5)`，TOW=0→5），不依赖 HOW 内�
 粗搜（1°）→ 细搜 → 迭代最小二乘精化。Nottingham **不给任何先验**即得
 52.93491°N / 1.16503°W（距采集点 1.96 km），与给先验的结果一致。
 
+![冷启动代价地形](docs/figures/pvt_coldstart.png)
+
+左：全球 1° 粗搜（130×360 格点），代价中位数 81 km，**仅 1 个格点低于 10 km**——即采集点所在处；
+右：采集点附近放大，代价呈锥形（实测 `cost ≈ 0.55·距采集点的距离`），
+`1 / 10 / 30 / 60 km` 等值线清楚地围出收敛域，超出约 150 km 后因逐星取整错一个 1 ms 而饱和到 ~80 km 平台。
+
 **合成验证（`scripts/13_synthetic_4sat_pvt.py`，已知真值）**：用已知真值场景走完整链路
 （真实距离 → 注入整数毫秒模糊度 → `build_measurement` → 最小二乘）严格证明定位引擎正确：
 
 | 场景 | 位置误差 | 说明 |
 |---|---|---|
-| 6 星无模糊，直接 WLS | **0.024 m** | 求解器数学正确 |
-| 6 星 + 注入共同整毫秒歧义（K=434579） | **0.024 m** | 整数毫秒消模糊正确（GPS 周量级） |
-| 4 星子集 | **0.024 m** | 完整 SPS 正确 |
-| 码相位噪声 σ = 2 / 5 / 10 m | 6.3 / 15.8 / 31.5 m | 误差 ≈ σ·GDOP，符合理论 |
-| 3 星 + 地球约束 | ~11 km | 两交点歧义，印证需 ≥4 星 |
+| 6 星无模糊，直接 WLS | **0.010 m** | 求解器数学正确 |
+| 6 星 + 注入共同整毫秒歧义（K=434579） | **0.010 m** | 整数毫秒消模糊正确（GPS 周量级） |
+| 4 星子集 | **0.010 m** | 完整 SPS 正确 |
+| 码相位噪声 σ = 2 / 5 / 10 m | 6.31 / 15.77 / 31.53 m | 误差 ≈ σ·GDOP，符合理论 |
+| 3 星 + 地球约束 | ~11.5 km | 两交点歧义，印证需 ≥4 星 |
+
+![定位精度阶梯](docs/figures/pvt_accuracy.png)
+
+从合成真值（厘米级）到真实数据（米 / 公里级）的完整精度阶梯。SiGe 与 Nottingham 走的是
+**同一套代码**：Nottingham 达 1.96 km，SiGe 为 21.8 km——差距来自数据集本身的量测一致性
+（奇偶校验已确认两者的子帧均无比特错误）。
 
 **修复**：GPS 周号在电文里仅 10 比特（WN mod 1024），每 1024 周回卷；本数据解出 717，
 真实扩展周号为 1741（2013），已在 `ephemeris.py` 按参考周号就近还原（该回卷不影响卫星
@@ -183,7 +201,8 @@ gnss-rx/
 │   ├── 12_time_and_geometry.py # GPS 时基 / 卫星星下点核验
 │   ├── 13_synthetic_4sat_pvt.py  # 合成 4 星 PVT 验证（已知真值）
 │   ├── 14_nottingham_pvt.py   # Nottingham 端到端 PVT（含 --diag 逐通道诊断）
-│   └── 15_timing_selfcheck.py  # 时基自检：合成信号核对 t_user 口径（定位两个符号 bug）
+│   ├── 15_timing_selfcheck.py  # 时基自检：合成信号核对 t_user 口径（定位两个符号 bug）
+│   └── 16_results_figures.py  # 结果配图：定位结果 / 冷启动代价地形 / 精度阶梯
 ├── docs/figures/        # 结果图
 └── data/                # 数据目录（*.bin 不入库）
 ```
@@ -198,6 +217,8 @@ uv sync                                      # 安装依赖（需 Python ≥ 3.1
 uv run python scripts/00_smoke_test.py       # 捕获验证
 uv run python scripts/01_tracking_test.py    # 跟踪验证（约 4 秒）
 uv run python scripts/02_real_data_test.py   # 真实信号验证（需先下载数据，见 data/README.md）
+uv run python scripts/14_nottingham_pvt.py   # 端到端定位：捕获→跟踪→星历→伪距→PVT（真实数据，米级）
+uv run python scripts/16_results_figures.py  # 复现 README 中的三张结果配图
 ```
 
 ## 算法说明

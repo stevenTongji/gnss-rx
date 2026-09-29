@@ -80,12 +80,21 @@ impossible, so this simultaneously validates acquisition, tracking and bit sync.
 
 ### Single-point positioning (PVT: real data + synthetic validation)
 
-**Real data (SiGe GN3S v3, 8-bit, fs 16.368 MHz)**: the full chain — acquisition → 30 s tracking
-→ ephemeris decode → pseudorange → weighted least squares — runs end to end. After fixing the parity
-bug (below), this dataset (ION GNSS SDR metadata-standard sample, collected 2013-05-23) yields
-**7 clean satellites** (PRN 1/7/8/9/11/17/28, C/N₀ 45–50 dB-Hz), which meets the full-SPS (≥4 sats)
-requirement; the Nottingham 1-bit dataset likewise yields **9 clean satellites**
-(`scripts/14_nottingham_pvt.py`).
+**Real data (Nottingham 1-bit, fs 5.456 MHz)**: the full chain — acquisition → 48 s tracking →
+ephemeris decode → pseudorange → weighted least squares — runs end to end with **9 clean satellites**
+(PRN 30/29/31/1/21/5/13/23/16) for a full SPS fix: **52.93°N / 1.17°W / h ≈ 0**, i.e. **1.96 km** from
+the published collection point, with **±2 m** pseudorange residuals.
+(The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28); it was collected in
+Munich, Germany (48.1715°N / 11.8087°E) and its PVT residual is ~±40 km (≈0.1 ms). The parity check
+confirms its subframes have 0 failures, so the residual is on the measurement/data side — this
+dataset's inherent level; see `scripts/07_sige_pvt_test.py`. Nottingham reaches metre level.)
+
+![PVT positioning result](docs/figures/pvt_result.png)
+
+Left: the fix is 1.96 km from the published collection point (rings at 0.5/1/2 km); middle: per-satellite
+pseudorange residuals, RMS 1.42 m; right: sky plot of the 9 satellites — most sit at low elevation
+(poor single-point geometry), yet the fix is still metre-level. All three panels are reproduced from
+cache by `scripts/16_results_figures.py`.
 
 > **Parity bug fixed (`ephemeris.py::strip_parity`)**: the IS-GPS-200 parity rule is
 > `d_i = r_i ⊕ D30*(prev word)`, where D30\* is the *received* bit (including the Costas inversion c),
@@ -105,17 +114,38 @@ requirement; the Nottingham 1-bit dataset likewise yields **9 clean satellites**
 > **52.93°N / 1.17°W / h ≈ 0** with **±2 m residuals**, i.e. **1.96 km** from the published collection
 > point — metre-level real-data positioning.
 
+**Cold start (no prior position at all)**: `pvt.solve_cold_start` searches a global lat/lon grid whose cost
+is "disambiguate the integer millisecond using the candidate point (per-satellite rounding) → spread of
+the residuals". Because the cross-satellite differences of `ρ_raw` contain exact integer-millisecond
+steps (±k·c ms), the rounding cancels them **exactly**: the cost is ~0 only at the true position and
+jumps elsewhere. Coarse search (1°) → fine search → iterated least squares. On Nottingham the solver
+reaches 52.93491°N / 1.16503°W (1.96 km from the collection point) **with no prior whatsoever** —
+identical to the prior-aided result.
+
+![Cold-start cost terrain](docs/figures/pvt_coldstart.png)
+
+Left: the global 1° coarse search (130×360 cells) has a median cost of 81 km and **exactly one cell
+below 10 km** — where the site is. Right: zoomed near the site, the cost forms a cone (measured
+`cost ≈ 0.55 × distance to the site`); the 1 / 10 / 30 / 60 km contours outline the capture region, and
+beyond ~150 km the cost saturates on a ~80 km plateau (one satellite's rounding is off by one 1 ms step).
+
 **Synthetic 4-sat validation (`scripts/13_synthetic_4sat_pvt.py`, known truth)**: because the real
 dataset has only 3 sats, a known-truth scenario exercises the full path (true range → injected
 integer-millisecond ambiguity → `build_measurement` → least squares) to prove the engine correct:
 
 | Scenario | Position error | Note |
 |---|---|---|
-| 6 sats, no ambiguity, direct WLS | **0.024 m** | solver math correct |
-| 6 sats + injected common ms ambiguity (K=434579) | **0.024 m** | integer-ms disambiguation correct (GPS-week scale) |
-| 4-sat subset | **0.024 m** | full SPS correct |
-| code-phase noise σ = 2 / 5 / 10 m | 6.3 / 15.8 / 31.5 m | error ≈ σ·GDOP, as predicted |
-| 3 sats + earth constraint | ~11 km | two-point ambiguity — motivates ≥4 sats |
+| 6 sats, no ambiguity, direct WLS | **0.010 m** | solver math correct |
+| 6 sats + injected common ms ambiguity (K=434579) | **0.010 m** | integer-ms disambiguation correct (GPS-week scale) |
+| 4-sat subset | **0.010 m** | full SPS correct |
+| code-phase noise σ = 2 / 5 / 10 m | 6.31 / 15.77 / 31.53 m | error ≈ σ·GDOP, as predicted |
+| 3 sats + earth constraint | ~11.5 km | two-point ambiguity — motivates ≥4 sats |
+
+![Positioning accuracy ladder](docs/figures/pvt_accuracy.png)
+
+The full accuracy ladder, from synthetic truth (cm) to real data (m / km level). SiGe and Nottingham run
+**the same code**: Nottingham reaches 1.96 km while SiGe sits at 21.8 km — the gap comes from each
+dataset's own measurement consistency (the parity check confirms neither has bit errors in its subframes).
 
 **Fix**: the GPS week number is only 10 bits in the message (WN mod 1024), rolling over every 1024
 weeks. This data decodes 717 but the true extended week is 1741 (2013); `ephemeris.py` now restores it
@@ -137,6 +167,7 @@ uv run python scripts/13_synthetic_4sat_pvt.py  # synthetic 4-sat PVT verificati
 uv run python scripts/15_timing_selfcheck.py # timing self-check (synthetic, pins the sign bugs)
 uv run python scripts/07_sige_pvt_test.py    # real-data PVT on SiGe (needs data)
 uv run python scripts/14_nottingham_pvt.py   # real-data PVT on Nottingham (needs data)
+uv run python scripts/16_results_figures.py  # regenerate the result figures in docs/figures/
 ```
 
 ## Implementation notes
