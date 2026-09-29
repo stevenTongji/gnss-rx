@@ -97,11 +97,22 @@ pseudorange residual **RMS 1.4 m**.
 > horizontal solutions differ by 9.4 m** (different geometry; any per-satellite systematic error
 > would push them apart).
 >
-> (The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28) and was collected in
-> Munich, Germany (48.1715°N/11.8087°E) — a coordinate **explicitly given by the ION metadata**, so
-> its 21.8 km *is* a real error; the parity check confirms its subframes have 0 failures, so the
-> residual is on the measurement/data side — this dataset's inherent level;
-> see `scripts/07_sige_pvt_test.py`.)
+> (The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28). Its ION metadata
+> carries `<position>` = Munich, Germany (48.1715°N/11.8087°E), but **that coordinate does not
+> survive checking**: recomputing with the IGS authoritative broadcast ephemeris shows 4 of the 7
+> tracked satellites are **below the horizon** there (−6°/−15°/−19°/−27°), with ranges of
+> 26,700–28,700 km versus the ≈25,776 km physical maximum for a ground receiver; the measurements
+> themselves point to ≈30°N/94°W, where all 7 are visible. That metadata entry carries
+> `<campaign>Demo data</campaign>`, so it is a placeholder — **it cannot be used as truth**.
+> See `scripts/18_igs_ephemeris_check.py`.)
+>
+> **So we currently hold no dataset with trustworthy surveyed coordinates**: Nottingham was only
+> ever claimed to yield "a position in Nottingham" (original source: Michele Bavaro's blog of
+> 2010-11-12, captured with "Primo" / "NSL's GNSS data grabber" — **no coordinates ever given**),
+> and SiGe's coordinate is the placeholder above. This repo therefore **no longer treats any
+> dataset's position as absolute truth**, and instead uses two verifiable independent references:
+> ① satellite side — IGS authoritative broadcast ephemeris (below); ② receiver side — self-checks
+> needing no external reference (residual × PDOP, satellite-subset consistency).
 
 ![PVT positioning result](docs/figures/pvt_result.png)
 
@@ -158,12 +169,11 @@ integer-millisecond ambiguity → `build_measurement` → least squares) to prov
 
 ![Positioning accuracy ladder](docs/figures/pvt_accuracy.png)
 
-The accuracy ladder. The first 6 rows are "difference from known truth"; because Nottingham **never
-published its antenna coordinates**, it is represented by two self-check metrics that need no external
-reference (subset consistency 9.4 m, formal precision 3.2 m); the grey row is merely "distance to the
-city centre" and **is not an error**. SiGe's truth comes from the ION metadata (trustworthy), so its
-21.8 km is a genuine error — the gap between the two datasets comes from their own measurement
-consistency (the parity check confirms neither has bit errors in its subframes).
+The accuracy ladder. The first 6 rows are "difference from known truth"; **neither real dataset has
+trustworthy surveyed coordinates** (Nottingham never published any; SiGe's metadata coordinate is
+refuted by the IGS ephemeris, see below), so they are represented by self-check metrics that need no
+external reference (Nottingham: subset consistency 9.4 m, formal precision 3.2 m). The grey rows mean
+"how far from some reference point" and **are not errors**.
 
 ### Comparison with a reference implementation (RTKLIB)
 
@@ -198,6 +208,35 @@ A lesson along the way: when porting Klobuchar I wrote the degree → semicircle
 −215 km delay, blowing the solution to −313 km height. Exactly why a reference implementation to
 compare against matters — a unit error like that is invisible when you only compare against yourself.
 
+### Validating the ephemeris decode against the IGS authoritative source (`scripts/18_igs_ephemeris_check.py`)
+
+The RTKLIB comparison answers "is the algorithm right"; you also need an **authoritative data source**
+to answer "are the decoded ephemeris bits right". This script derives the date from the GPS
+week/second-of-week, auto-downloads that day's broadcast ephemeris (RINEX) from the BKG IGS archive,
+compares every parameter, and feeds both parameter sets through the same position formula to get a
+**satellite position difference**:
+
+| PRN | IODE (ours / IGS) | Δtoe | **|Δ satellite position|** |
+|---|---|---|---|
+| 1 / 7 / 8 / 11 / 17 / 28 | identical | 0 s | **0.0 – 0.1 mm** |
+| **9** | **34 / 36** | **+7248 s** | **19.4 m** (M0 off by 60.6°) ← silent bit error |
+
+Two conclusions:
+
+1. **6 of 7 satellites agree with the IGS authoritative source to 0.1 mm**, validating the whole
+   chain "demodulate → strip parity → assemble subframes → satellite position" — independently of the
+   RTKLIB evidence chain.
+2. **PRN 9 contains a silent bit error**: our `toe` is off by 48 s and M0 by 60.6°, which
+   `self_check()` cannot see (it only validates IODE consistency and the magnitude of sqrtA/e/i0,
+   not position-critical parameters such as M0/Ω0), and GPS parity only guarantees detection of
+   *detectable* errors. Such errors can only be found by comparison against an external authority —
+   which is precisely why this script exists.
+
+The same script also **vets a dataset's claimed coordinates**: using the authoritative ephemeris it
+computes which satellites are visible from a given site. That is how SiGe's coordinate was shown
+untrustworthy, and it confirms all 9 Nottingham satellites are visible from the city-centre area
+(−6°…+67°), consistent with our own solved position.
+
 **Fix**: the GPS week number is only 10 bits in the message (WN mod 1024), rolling over every 1024
 weeks. This data decodes 717 but the true extended week is 1741 (2013); `ephemeris.py` now restores it
 to the nearest 1024-multiple of a reference week. (The rollover does not affect satellite position,
@@ -220,6 +259,7 @@ uv run python scripts/07_sige_pvt_test.py    # real-data PVT on SiGe (needs data
 uv run python scripts/14_nottingham_pvt.py   # real-data PVT on Nottingham (needs data)
 uv run python scripts/16_results_figures.py  # regenerate the result figures in docs/figures/
 uv run python scripts/17_rtklib_comparison.py # item-by-item comparison with RTKLIB
+uv run python scripts/18_igs_ephemeris_check.py # cross-check against the IGS authoritative ephemeris
 ```
 
 ## Implementation notes

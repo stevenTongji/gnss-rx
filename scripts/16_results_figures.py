@@ -310,7 +310,7 @@ def fig_accuracy(nott, sige) -> None:
         ("合成：3 星 + 地球约束（固有歧义）", 11449.96, "#bfa14a"),
         ("真实 Nottingham：两组独立子集水平一致性", subset_n, "#1f6feb"),
         ("真实 Nottingham：形式精度（残差 × PDOP）", formal_n, "#4dabf7"),
-        ("真实 SiGe：距元数据真值（慕尼黑，坐标已公布）", err_s * 1e3, "#8e44ad"),
+        ("参照：SiGe 至元数据坐标（该坐标经 IGS 反证不可信）", err_s * 1e3, "#adb5bd"),
         ("参照：Nottingham 至市中心（该参考点非天线坐标）", err_n * 1e3, "#adb5bd"),
     ]
     labels = [r[0] for r in rows]
@@ -340,9 +340,9 @@ def fig_accuracy(nott, sige) -> None:
     ax.set_axisbelow(True)
     fig.tight_layout(rect=(0, 0.045, 1, 1))
     fig.text(0.012, 0.012,
-             "前 6 项为「与已知真值之差」；Nottingham 的 9 星数据从未公布天线坐标，"
-             "故改用两项不依赖外部参考点的自校验指标；"
-             "灰条仅为参照（市中心坐标非天线位置）。脚本：13 / 14 / 07 / 16",
+             "前 6 项为「与已知真值之差」；两份真实数据都无可信实测坐标（Nottingham 从未公布、"
+             "SiGe 元数据坐标已被 IGS 星历反证），故改用不依赖外部参考点的自校验指标；"
+             "灰条仅在说明「离某个参考点多远」，不是误差。脚本：13 / 14 / 07 / 16 / 18",
              fontsize=7.6, color="#6b7280")
     out = FIGDIR / "pvt_accuracy.png"
     fig.savefig(out); plt.close(fig)

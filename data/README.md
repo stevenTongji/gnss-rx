@@ -33,9 +33,13 @@ curl -L -o nottingham_gps_l1_1bit.bin \
   更上游是 Michele Bavaro 的 GPS 博客（2010 年，原链接已失效）
 - ⚠️ **这份数据没有公布天线的精确坐标**。随包的官方说明原文只有一句：
   「if your decoding works you should get **a lat/lon position in Nottingham, UK**」
-  —— 只承诺"在英国的诺丁汉"。因此本仓库做 PVT 校验时**不能拿它当位置真值**，
+  —— 只承诺"在英国的诺丁汉"。采集工具是 "Primo"／"NSL 的 GNSS 抓取器"
+  （原文：*"here is file captured with Primo which should give you a position in Nottingham"*），
+  **从未给出任何坐标**。因此本仓库做 PVT 校验时**不能拿它当位置真值**，
   只能核验"结果是否落在诺丁汉"；对精度的验证改用不依赖外部参考点的自校验
   （残差 × PDOP 的形式精度、卫星子集一致性），见 `scripts/17_rtklib_comparison.py`。
+  参考：最近的 IGS 站 **NOTT**（52.962°N, 1.197°W, h=93.844 m）在解算位置外 3.7 km，
+  高程则相差 ~4–7 m——可作为量级参考，但不能当作采集点。
 - 1-bit 量化损失约 2 dB 信噪比，但对捕获/跟踪影响很小
 - **欠采样注意**：模拟中频 4.092 MHz 高于 fs/2，混叠后数字中频为 1.364 MHz，
   且多普勒符号与真实值相反（详见 `scripts/02_real_data_test.py` 的注释）
@@ -58,8 +62,12 @@ curl -L -r 0-654719999 -o sige_gps_l1_8bit.dat \
 ```
 
 - 元数据（采样率/中频/编码/采集位置）：<https://sdr.ion.org/SiGe/SiGe_Bands-L1.sdrx>
-- **采集地：德国慕尼黑**（元数据 `lat=48.1715°, lon=11.8087°, h≈577 m`，2013-05-23 采集）——
-  可用作 PVT 的真值参考（`scripts/07_sige_pvt_test.py` 即用慕尼黑先验）。
+- ⚠️ **元数据里的采集地坐标不可信**：`<position>` 写的是德国慕尼黑
+  （`lat=48.1715°, lon=11.8087°, h≈577 m`，`<toa>2013-05-23T00:00:00Z`），但该条目
+  `<campaign>` 写的是 "Demo data"。用 IGS 权威广播星历独立反算，**7 颗被跟踪的卫星里
+  有 4 颗在该坐标处位于地平线以下**（−6°/−15°/−19°/−27°），斜距 26,700–28,700 km
+  远超地面接收机的物理上限（≈25,776 km）；而量测本身指向约 30°N/94°W（7 颗全可见）。
+  **因此不能拿它当真值**；判定过程见 `scripts/18_igs_ephemeris_check.py`。
 - 验证脚本：`scripts/05_sige_ephemeris_test.py`（星历）、PVT 脚本复用同一份数据
 
 ### ② 其他可选数据集
