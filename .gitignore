@@ -10,10 +10,14 @@ data/raw/*
 *.bin
 *.dat
 *.mat
+# 例外：仿真用的 RINEX 导航电文（270 KB 文本，是脚本 19 的输入而非采样数据）
+!data/raw/sim/
+!data/raw/sim/brdc0010.22n
 
 # ---- 工具缓存 / 中间产物 ----
 .uv-cache/
 results/
+.tools/
 # 跟踪/测量缓存 pkl、运行日志（可由脚本重新生成）
 data/processed/
 

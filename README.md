@@ -237,6 +237,40 @@ RTKLIB 对照解决的是"算法对不对"，还需要一个**权威数据源**�
 SiGe 就是这么被判定为"坐标不可信"的，而 Nottingham 的 9 颗星在市中心一带全部可见（−6°…+67°），
 与其解算位置一致。
 
+### 端到端绝对定位误差：合成信号携带真值（`scripts/19_gpssdrsim_validation.py`）
+
+前面几层解决的是"算法对不对""星历比特对不对"，都**给不出绝对定位误差**——因为两份真实
+数据集都没有可信实测坐标。这一层补上缺口，用的是开源项目的通行做法（GNSS-SDR 的
+`position_test` 即如此）：**用 gps-sdr-sim 生成真值已知的中频样本**。
+
+真值就是 `-l Lat,Lon,Hgt` 的输入坐标、误差为 0，于是跑同一条链路得到的就是**端到端绝对
+定位误差**，覆盖 捕获 → 跟踪 → 位同步/帧同步 → 星历解码 → 伪距 → PVT
+（对照：`scripts/13`、`scripts/15` 都绕过了捕获与跟踪，这两段此前从未被带真值的数据验证过）。
+
+场景：诺丁汉 (52.9536°N, 1.1505°W, 50 m)，2022-01-01，48 s，fs = 5.456 MHz、8-bit；
+**12 颗星全部解出**（C/N₀ 45–56 dB-Hz）。指标按 GNSS-SDR 定义，阈值沿用其默认值：
+
+| 配置 | 单历元 2D / 3D | 多历元偏差 2D / 3D | DRMS | CEP | SEP |
+|---|---|---|---|---|---|
+| 基线（无大气改正） | 4.09 / 4.31 m | 4.08 / 4.15 m | 4.51 | 3.16 | 3.59 |
+| + 电离层 Klobuchar | 4.05 / 5.99 m | 4.04 / 5.91 m | 4.46 | 3.11 | 5.26 |
+| + 电离层 + 对流层 | 6.51 / 32.39 m | 6.51 / 32.38 m | 7.15 | 4.22 | 21.56 |
+| **+ 电离层 + 15° 仰角截止**（标准配置） | **2.68 / 3.56 m** | **2.61 / 3.43 m** | 3.02 | 2.42 | 3.60 |
+
+判定（阈值 2D ≤ 2 m、3D ≤ 5 m、CEP ≤ 2 m、SEP ≤ 10 m）：3D 偏差 3.43 m ✅、SEP 3.60 ✅；
+**2D 偏差 2.61 m 与 CEP 2.42 m 略超 2.0 m 阈值** ❌ ——如实记录，不做粉饰。
+剩余误差主要是码相位测量噪声（伪距残差约 ±2.5 m 且与仰角相关），下一步可用载波平滑伪距
+或收窄 DLL 带宽来改善。
+
+这一层还顺带完成两件有用的事：
+
+1. **抓出一个真 bug**：`atmosphere.ionosphere_delay` 把「半周」值直接喂给了 `math.cos`，
+   使电离层穿透点与地方时全错。参考实现的写法是 RTKLIB 的 `cos(phi*PI)`、gps-sdr-sim 的
+   `cos(azel[0])`——三角函数必须吃弧度。修复后本模块与仿真器模型**逐星一致到 0.0000 m**
+   （这种错误自己跟自己比永远看不见，必须有外部参考）。
+2. **验证"不要无脑加改正"**：gps-sdr-sim **不含对流层模型**（源码里 `tropo` 出现 0 次），
+   硬加 Saastamoinen 改正会凭空引入 −32 m 高程偏差——上表第三行就是这个反例。
+
 
 **修复**：GPS 周号在电文里仅 10 比特（WN mod 1024），每 1024 周回卷；本数据解出 717，
 真实扩展周号为 1741（2013），已在 `ephemeris.py` 按参考周号就近还原（该回卷不影响卫星
@@ -286,7 +320,8 @@ gnss-rx/
 │   ├── 15_timing_selfcheck.py  # 时基自检：合成信号核对 t_user 口径（定位两个符号 bug）
 │   ├── 16_results_figures.py  # 结果配图：定位结果 / 冷启动代价地形 / 精度阶梯
 │   ├── 17_rtklib_comparison.py # 与 RTKLIB 逐项比对 + 大气/加权改正的影响
-│   └── 18_igs_ephemeris_check.py # 用 IGS 权威星历校验解码 + 数据集坐标体检
+│   ├── 18_igs_ephemeris_check.py # 用 IGS 权威星历校验解码 + 数据集坐标体检
+│   └── 19_gpssdrsim_validation.py # 合成信号（真值已知）的端到端绝对定位误差
 ├── docs/figures/        # 结果图
 └── data/                # 数据目录（*.bin 不入库）
 ```
@@ -305,6 +340,7 @@ uv run python scripts/14_nottingham_pvt.py   # 端到端定位：捕获→跟踪
 uv run python scripts/16_results_figures.py  # 复现 README 中的结果配图
 uv run python scripts/17_rtklib_comparison.py # 与 RTKLIB 逐项比对 + 各改正项影响
 uv run python scripts/18_igs_ephemeris_check.py # 与 IGS 权威星历比对（需联网下载 RINEX）
+uv run python scripts/19_gpssdrsim_validation.py # 端到端绝对误差（需 gps-sdr-sim，见脚本头）
 ```
 
 ## 算法说明

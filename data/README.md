@@ -70,6 +70,35 @@ curl -L -r 0-654719999 -o sige_gps_l1_8bit.dat \
   **因此不能拿它当真值**；判定过程见 `scripts/18_igs_ephemeris_check.py`。
 - 验证脚本：`scripts/05_sige_ephemeris_test.py`（星历）、PVT 脚本复用同一份数据
 
+### ①c 合成数据（gps-sdr-sim，**唯一有精确真值的数据**）
+
+真实数据集要么没公布天线坐标（Nottingham），要么元数据坐标经 IGS 权威星历反证为占位值
+（SiGe，见 `scripts/18_igs_ephemeris_check.py`），所以**都给不出绝对定位误差**。
+要得到端到端绝对误差，通行做法（GNSS-SDR 的 `position_test` 即如此）是自己造一份
+**真值已知**的中频样本：
+
+```bash
+git clone https://github.com/osqzss/gps-sdr-sim && cd gps-sdr-sim
+gcc gpssim.c -lm -O2 -o gps-sdr-sim
+# macOS 若报 "SDK malformed file"：指定一个与 clang 匹配的 SDK，例如
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk gcc gpssim.c -lm -O2 -o gps-sdr-sim
+```
+
+把可执行文件放到 `.tools/gps-sdr-sim`（已被 .gitignore 排除），脚本会自动调用：
+
+```bash
+uv run python scripts/19_gpssdrsim_validation.py
+```
+
+- 真值 = `-l Lat,Lon,Hgt` 的输入坐标，误差为 0；`-e` 用 RINEX 导航文件
+  （仓库已带 `data/raw/sim/brdc0010.22n`，270 KB，是脚本的输入而非采样数据）
+- 输出为**零中频复数 I/Q**，`scripts/19` 会用 `io_if.iq_to_real_int8` 上变频成实数 IF int8，
+  复用现有实数链路
+- 仿真器注入 Klobuchar 电离层（系数取自 nav 头的 ION ALPHA/BETA），
+  **不含对流层**（源码里 `tropo` 出现 0 次）——因此不要对它加对流层改正
+- ⚠️ 持续时间别太短：数据开头要先丢掉牵引段再做位同步，**第一个 SF1 常收不全**；
+  48 s 可让下一个 SF1（每 30 s 一轮）完整落入窗口
+
 ### ② 其他可选数据集
 
 - **SoftGNSS 配套数据**（Borre 教材，60.5 s，8-bit I/Q，38.192 MHz）：

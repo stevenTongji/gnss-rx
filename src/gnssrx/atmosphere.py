@@ -90,10 +90,15 @@ def ionosphere_delay(alpha, beta, lat_deg: float, lon_deg: float,
     az = az_deg * SC
 
     psi = 0.0137 / (el + 0.11) - 0.022                       # 地心角
-    phi_i = phi_u + psi * math.cos(az)
+    # ⚠️ 三角函数的参数必须是**弧度**，而 φ/λ 是半周、方位角是度 —— 喂进去前必须换算。
+    #    参考实现：RTKLIB 写 `psi*cos(az)`（az 本身是弧度）与 `cos(phi*PI)`（phi 是半周，
+    #    乘 π 才回到弧度）；gps-sdr-sim 同。此前把半周值直接喂给 math.cos，
+    #    导致穿透点 φ_i/λ_i 与地方时 t 全错 → 改正反而让结果变差（scripts/19 暴露）。
+    az_rad = math.radians(az_deg)
+    phi_i = phi_u + psi * math.cos(az_rad)
     if abs(phi_i) > 0.416:
         phi_i = 0.416 if phi_i > 0 else -0.416
-    lam_i = lam_u + psi * math.sin(az) / math.cos(phi_i)
+    lam_i = lam_u + psi * math.sin(az_rad) / math.cos(phi_i * math.pi)
     phi_m = phi_i + 0.064 * math.cos((lam_i - 1.617) * math.pi)
 
     t = 4.32e4 * lam_i + gps_tow_s

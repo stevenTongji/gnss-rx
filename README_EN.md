@@ -237,6 +237,45 @@ computes which satellites are visible from a given site. That is how SiGe's coor
 untrustworthy, and it confirms all 9 Nottingham satellites are visible from the city-centre area
 (−6°…+67°), consistent with our own solved position.
 
+### End-to-end absolute positioning error: synthetic signal carrying truth (`scripts/19_gpssdrsim_validation.py`)
+
+The layers above answer "is the algorithm right" and "are the decoded ephemeris bits right", but none
+of them yields an **absolute positioning error** — neither real dataset has trustworthy surveyed
+coordinates. This layer fills that gap the way GNSS-SDR's `position_test` does: **generate IF samples
+with known truth using gps-sdr-sim**.
+
+The truth is simply the `-l Lat,Lon,Hgt` input (zero error), so running the same chain yields the
+**end-to-end absolute error** over acquisition → tracking → bit/frame sync → ephemeris decode →
+pseudorange → PVT. (By contrast `scripts/13` and `scripts/15` bypass acquisition and tracking — those
+two stages had never been validated against data with known truth.)
+
+Scenario: Nottingham (52.9536°N, 1.1505°W, 50 m), 2022-01-01, 48 s, fs = 5.456 MHz, 8-bit;
+**all 12 satellites decoded** (C/N₀ 45–56 dB-Hz). Metrics follow the GNSS-SDR definitions, with
+GNSS-SDR's default thresholds:
+
+| Configuration | per-epoch 2D / 3D | bias 2D / 3D | DRMS | CEP | SEP |
+|---|---|---|---|---|---|
+| baseline (no atmospheric correction) | 4.09 / 4.31 m | 4.08 / 4.15 m | 4.51 | 3.16 | 3.59 |
+| + ionosphere Klobuchar | 4.05 / 5.99 m | 4.04 / 5.91 m | 4.46 | 3.11 | 5.26 |
+| + ionosphere + troposphere | 6.51 / 32.39 m | 6.51 / 32.38 m | 7.15 | 4.22 | 21.56 |
+| **+ ionosphere + 15° elevation cutoff** (standard config) | **2.68 / 3.56 m** | **2.61 / 3.43 m** | 3.02 | 2.42 | 3.60 |
+
+Verdict (thresholds 2D ≤ 2 m, 3D ≤ 5 m, CEP ≤ 2 m, SEP ≤ 10 m): 3D bias 3.43 m ✅, SEP 3.60 ✅;
+**2D bias 2.61 m and CEP 2.42 m slightly exceed the 2.0 m threshold** ❌ — reported honestly, not
+polished. The remainder is mainly code-phase measurement noise (pseudorange residuals ≈ ±2.5 m and
+elevation-dependent); carrier smoothing or a narrower DLL bandwidth is the next step.
+
+Two side effects worth noting:
+
+1. **A real bug found**: `atmosphere.ionosphere_delay` fed *semicircle* values straight into
+   `math.cos`, corrupting the ionospheric pierce point and the local time. The reference
+   implementations use RTKLIB's `cos(phi*PI)` and gps-sdr-sim's `cos(azel[0])` — trig functions need
+   radians. After the fix our model matches the simulator's **to 0.0000 m per satellite**. A unit
+   error like this is invisible when you only compare against yourself.
+2. **"Don't add corrections blindly" verified**: gps-sdr-sim has **no troposphere model** (`tropo`
+   appears 0 times in its source), so forcing a Saastamoinen correction injects a spurious −32 m
+   height bias — row 3 above is exactly that counter-example.
+
 **Fix**: the GPS week number is only 10 bits in the message (WN mod 1024), rolling over every 1024
 weeks. This data decodes 717 but the true extended week is 1741 (2013); `ephemeris.py` now restores it
 to the nearest 1024-multiple of a reference week. (The rollover does not affect satellite position,
@@ -260,6 +299,7 @@ uv run python scripts/14_nottingham_pvt.py   # real-data PVT on Nottingham (need
 uv run python scripts/16_results_figures.py  # regenerate the result figures in docs/figures/
 uv run python scripts/17_rtklib_comparison.py # item-by-item comparison with RTKLIB
 uv run python scripts/18_igs_ephemeris_check.py # cross-check against the IGS authoritative ephemeris
+uv run python scripts/19_gpssdrsim_validation.py # end-to-end abs. error (needs gps-sdr-sim, see header)
 ```
 
 ## Implementation notes
