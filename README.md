@@ -291,8 +291,18 @@ epochs = refine_epochs(epochs, coarse)  # ② 用粗位置重算卫星位置
 base   = solve_series(epochs, ...)      # ③ 正式求解
 ```
 
-⚠️ 同一缺陷也存在于 `scripts/07`（SiGe）与 `scripts/14`（Nottingham）—— 它们的
-`build_measurement` 调用同样没传 `recv_nominal`，也需要照此迭代一轮。
+**已同步到真实数据脚本**：`scripts/07`（SiGe）与 `scripts/14`（Nottingham）原先
+同样没传 `recv_nominal`，现都已接入 `pvt.refine_measurements` 做一轮迭代。但要**如实
+说明效果**：两者都没有明显改善 ——
+
+| 数据集 | 迭代前 | 迭代后 |
+|---|---|---|
+| SiGe | 48.3215°N / 11.9992°E，残差 ±40 km | 完全一致 |
+| Nottingham | 52.934908°N / 1.164975°W，残差 ±2 m | 52.934911°N / 1.164975°W，残差 ±2.8 m |
+
+这符合**量级判断**：Sagnac 标称接收机的效应是**米级**（合成数据上实测残差 std 0.53 m），
+而 SiGe 的残差是 **±40 km（≈0.13 ms）**、Nottingham 已经到米级 —— 都不在这个量级上。
+（SiGe 的 ±40 km 仍未定位到根因，需要另找方向；不能指望一个米级修正去解释公里级误差。）
 
 **码环噪声带宽的实测对照**（修复前扫的，静态场景，只改 `TrackingConfig.dll_bandwidth_hz`）：
 

@@ -116,6 +116,39 @@ def build_measurement(eph, prn: int, tow_seconds: float, t_user_seconds: float,
     }
 
 
+def refine_measurements(measurements: list[dict], recv_pos: np.ndarray,
+                        fs: float) -> list[dict]:
+    """用**已解出的接收机位置**重算卫星位置，消除 Sagnac 的「标称接收机」偏差。
+
+    为什么需要它
+    ------------
+    Sagnac 修正角 θ = ω·ρ/c 里的 ρ 是**接收机到卫星的斜距**，可第一次解算时我们
+    并不知道接收机在哪。`build_measurement` 在 `recv_nominal=None` 时退而用
+    「卫星星下点的地表点」当标称接收机 —— 它与真实接收机可差上千公里，θ 随之
+    算错，给每颗星留下**固定的米级伪距偏差**。在 scripts/19 的合成数据上做过
+    消融实验（同一份数据、只差这一步）：端到端 2D 偏差 2.22 m → 0.54 m。
+
+    这不是权宜之计，而是**接收机的标准做法**：接收机位置与卫星位置本就要迭代
+    求解（RTKLIB 的 `pntpos()` 同样在循环里用当前接收机位置重算几何距离）。
+
+    要求 `measurements` 的每一项带 `_eph`（Ephemeris）与 `_t_user`（接收机时刻）；
+    缺任一项则原样返回，以便兼容旧缓存。
+    """
+    out: list[dict] = []
+    for m in measurements:
+        eph, t_user = m.get("_eph"), m.get("_t_user")
+        if eph is None or t_user is None:
+            out.append(m)
+            continue
+        m2 = build_measurement(eph, m["prn"], m["tow"], t_user, fs,
+                               recv_nominal=recv_pos)
+        m2["tow"] = m["tow"]
+        m2["_eph"] = eph
+        m2["_t_user"] = t_user
+        out.append(m2)
+    return out
+
+
 def resolve_ms_ambiguity(measurements: list[dict],
                          p0: np.ndarray,
                          c: float = C_LIGHT) -> list[dict]:

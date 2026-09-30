@@ -43,8 +43,8 @@ from gnssrx.ephemeris import decode_subframes, read_tow, strip_parity     # noqa
 from gnssrx.io_if import read_1bit_i                                     # noqa: E402
 from gnssrx.nav_msg import BITS_PER_SUBFRAME, bit_sync, \
     bit_sync_transitions, extract_bits, find_subframes                   # noqa: E402
-from gnssrx.pvt import build_measurement, ecef_to_llh, solve_cold_start, \
-    solve_robust                                                         # noqa: E402
+from gnssrx.pvt import build_measurement, ecef_to_llh, refine_measurements, \
+    solve_cold_start, solve_robust                                      # noqa: E402
 from gnssrx.tracking import TrackingConfig, track_all                    # noqa: E402
 
 DATA = ROOT / "data" / "raw" / "nottingham_gps_l1_1bit.bin"
@@ -169,7 +169,11 @@ def get_measurements(regen: bool = False) -> list[dict]:
     """完整链路 → 返回干净卫星的伪距观测列表（dict）。带磁盘缓存。"""
     if CACHE.exists() and not regen:
         with open(CACHE, "rb") as f:
-            return pickle.load(f)                                     # type: ignore
+            cached = pickle.load(f)                                   # type: ignore
+        # 旧缓存没有 _eph（迭代重算卫星位置需要），视为过期 → 重建
+        if cached and "_eph" in cached[0]:
+            return cached
+        print("   （测量缓存缺少 _eph，重建以启用迭代重算）")
 
     track = get_tracking(regen)
     measurements = []
@@ -204,6 +208,10 @@ def get_measurements(regen: bool = False) -> list[dict]:
         # （合成自检脚本 15 已严格验证：减号下各星 delta 为公共常数；加号则散布 ~1ms）。
         t_user = m_block / 1000.0 - unwrapped[m_block] / 1.023e6
         meas = build_measurement(eph, prn, tow, t_user, FS)
+        meas["tow"] = tow
+        # 留着供 refine_measurements 迭代重算卫星位置（见 pvt.refine_measurements）
+        meas["_eph"] = eph
+        meas["_t_user"] = t_user
         print(f"   PRN {prn:>2}  ✅ 伪距 = {meas['pseudorange']:.3e} m  "
               f"(t_sat={meas['t_sat']:.1f}s  t_user={t_user:.3f}s)")
         measurements.append(meas)
@@ -244,6 +252,12 @@ def main() -> int:
     print(f"\n③ 迭代加权最小二乘定位（完整 SPS，{len(meas)} 星）")
     print("   先试【冷启动】（不给任何先验，全球网格搜索自动定初值）：")
     sol_free = solve_cold_start(meas)
+    # 迭代重算卫星位置：Sagnac 的 θ = ω·ρ/c 需要接收机位置，第一次只能用「卫星星下点的
+    # 地表点」当标称值，会留下每星固定的米级偏差（见 pvt.refine_measurements）。
+    # 真实接收机同样是迭代的；scripts/19 的消融实验显示这一步把端到端 2D 从 2.2 m 降到 0.54 m。
+    if meas and "_eph" in meas[0]:
+        meas = refine_measurements(meas, sol_free["pos"], FS)
+        sol_free = solve_cold_start(meas)
     fla, flo, fh = ecef_to_llh(sol_free["pos"])
     ferr = _great_circle_km(sol_free["pos"], truth_ecef)
     print(f"   冷启动：lat={fla:.5f}° lon={flo:.5f}° h={fh:.1f} m "

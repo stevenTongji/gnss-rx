@@ -30,7 +30,8 @@ from gnssrx.ephemeris import decode_subframes, read_tow, strip_parity     # noqa
 from gnssrx.io_if import read_real_int8                                  # noqa: E402
 from gnssrx.nav_msg import BITS_PER_SUBFRAME, bit_sync, extract_bits, \
     find_subframes                                                       # noqa: E402
-from gnssrx.pvt import build_measurement, ecef_to_llh, solve_robust             # noqa: E402
+from gnssrx.pvt import build_measurement, ecef_to_llh, refine_measurements, \
+    solve_robust                                                         # noqa: E402
 
 import math
 
@@ -103,7 +104,11 @@ def get_measurements(regen: bool = False) -> list[dict]:
     """完整链路 → 返回干净卫星的伪距观测列表（dict）。带磁盘缓存。"""
     if CACHE.exists() and not regen:
         with open(CACHE, "rb") as f:
-            return pickle.load(f)                                     # type: ignore
+            cached = pickle.load(f)                                   # type: ignore
+        # 旧缓存没有 _eph（迭代重算卫星位置需要），视为过期 → 重建
+        if cached and "_eph" in cached[0]:
+            return cached
+        print("   （测量缓存缺少 _eph，重建以启用迭代重算）")
 
     track = get_tracking(regen)
     measurements = []
@@ -144,6 +149,10 @@ def get_measurements(regen: bool = False) -> list[dict]:
         # 绝对值的时基偏置由钟差 b 吸收。
         t_user = m_block / 1000.0 - unwrapped[m_block] / 1.023e6
         meas = build_measurement(eph, prn, tow + TOW_DELTA_S, t_user, FS)
+        meas["tow"] = tow + TOW_DELTA_S
+        # 留着供 refine_measurements 迭代重算卫星位置（见 pvt.refine_measurements）
+        meas["_eph"] = eph
+        meas["_t_user"] = t_user
         print(f"   PRN {prn:>2}  ✅ ρ={meas['pseudorange']:.4e}  "
               f"off={offset:2d} start={start:5d} m_blk={m_block:6d} "
               f"τ={unwrapped[m_block]:+9.2f}chip  tow={tow:.0f}  t_user={t_user:.6f}")
@@ -205,6 +214,14 @@ def main() -> int:
         print(f"   （对照）质心冷启动解：lat={clat:.4f}° lon={clon:.4f}° h={ch/1e3:.2f} km "
               f"收敛={cold['converged']}  ← 说明冷启动消模糊不稳")
 
+    # 迭代重算卫星位置：Sagnac 的 θ = ω·ρ/c 需要接收机位置，第一次解算时只能用
+    # 「卫星星下点的地表点」当标称值，会留下每星固定的米级偏差（见 pvt.refine_measurements）。
+    # 真实接收机同样是迭代的；scripts/19 的消融实验显示这一步把端到端 2D 从 2.2 m 降到 0.54 m。
+    if meas and "_eph" in meas[0]:
+        meas = refine_measurements(meas, sol["pos"], FS)
+        sol = solve_robust(meas, earth_constraint=earth,
+                           p0=sol["pos"], init=sol["pos"])
+
     pos = sol["pos"]
     lat, lon, h = ecef_to_llh(pos)
     print(f"   收敛: {sol['converged']}  迭代: {sol['iter']}  卫星数: {sol['n_sat']}")
@@ -220,10 +237,11 @@ def main() -> int:
     print("\n" + "=" * 78)
     if sol["converged"] and sol["n_sat"] >= 4:
         print(f"✅ PVT 定位成功（真实数据，{len(meas)} 星完整 SPS）。")
-        print("   注：本数据（SiGe 8-bit）残差约 ±40 km；奇偶校验"
-              "（ephemeris.parity_failures）确认其子帧全部 0 失败（星历无比特错误），")
-        print("   故该残余来自量测/数据侧，属本数据集固有水平；"
-              "另一公开数据集 Nottingham（scripts/14）可达【米级】。")
+        print("   注：本数据（SiGe 8-bit）残差约 ±40 km（≈0.13 ms）。奇偶校验"
+              "（ephemeris.parity_failures）确认全部子帧 0 失败、IGS 权威星历比对")
+        print("   也确认星历与卫星位置无误，故残余在【量测侧】。但根因尚未定位：")
+        print("   Sagnac 标称接收机、码环带宽、采样率等已排除（均为米级效应，")
+        print("   量级不符）；Nottingham（scripts/14）同一套代码可达米级。")
         rc = 0
     else:
         print("❌ PVT 未收敛。")

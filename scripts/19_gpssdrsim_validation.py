@@ -464,8 +464,13 @@ def main() -> int:
     print("\n④ 逐历元定位（第一历元冷启动，无先验；后续用上一历元解作先验）")
     # ④-a 粗定位：Sagnac 的标称接收机只能先用「卫星星下点的地表点」
     coarse = solve_series(epochs, alpha, beta, False, False, None)
-    # ④-b 用粗定位结果重算卫星位置（消除上述标称带来的每星固定偏差），再正式求解
-    epochs = refine_epochs(epochs, coarse)
+    # ④-b 用粗定位结果重算卫星位置（消除上述标称带来的每星固定偏差），再正式求解。
+    #      --no-refine 可关掉这一步，用于**消融实验**（同一份数据、只差这一项，
+    #      才能干净地证明精度变化确实由它带来，而不是拿不同脚本的数字互相比）。
+    if "--no-refine" in sys.argv:
+        print("   ⚠️ --no-refine：跳过迭代重算（消融对照组）")
+    else:
+        epochs = refine_epochs(epochs, coarse)
     base = solve_series(epochs, alpha, beta, False, False, None)
     iono = solve_series(epochs, alpha, beta, True, False, base)
     both = solve_series(epochs, alpha, beta, True, True, base)

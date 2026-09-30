@@ -297,8 +297,20 @@ epochs = refine_epochs(epochs, coarse)  # (2) recompute satellite positions from
 base   = solve_series(epochs, ...)      # (3) final solve
 ```
 
-⚠️ The same defect exists in `scripts/07` (SiGe) and `scripts/14` (Nottingham): their
-`build_measurement` calls likewise omit `recv_nominal` and need the same iteration.
+**Applied to the real-data scripts too**: `scripts/07` (SiGe) and `scripts/14` (Nottingham)
+likewise omitted `recv_nominal` and now call `pvt.refine_measurements` for one iteration.
+The effect must be reported honestly: **neither improved noticeably** —
+
+| Dataset | before | after |
+|---|---|---|
+| SiGe | 48.3215°N / 11.9992°E, residuals ±40 km | identical |
+| Nottingham | 52.934908°N / 1.164975°W, residuals ±2 m | 52.934911°N / 1.164975°W, ±2.8 m |
+
+That matches the **order-of-magnitude reasoning**: the Sagnac nominal-receiver effect is
+**metre-level** (measured 0.53 m residual std on the synthetic data), whereas SiGe's residual is
+**±40 km (≈0.13 ms)** and Nottingham is already at metre level — neither is in that regime.
+(SiGe's ±40 km remains unlocalised and needs a separate line of investigation; a metre-level
+correction cannot explain a kilometre-level error.)
 
 **Measured sweep of the DLL noise bandwidth** (taken before the fix; static scenario, only
 `TrackingConfig.dll_bandwidth_hz` changes):
