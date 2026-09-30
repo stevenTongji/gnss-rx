@@ -31,7 +31,7 @@ from gnssrx.io_if import read_real_int8                                  # noqa:
 from gnssrx.nav_msg import BITS_PER_SUBFRAME, bit_sync, extract_bits, \
     find_subframes                                                       # noqa: E402
 from gnssrx.pvt import build_measurement, ecef_to_llh, refine_measurements, \
-    solve_robust                                                         # noqa: E402
+    solve_cold_start, solve_robust                                       # noqa: E402
 
 import math
 
@@ -203,16 +203,24 @@ def main() -> int:
         print(f"   （对照）质心冷启动解：lat={clat:.4f}° lon={clon:.4f}° h={ch/1e3:.2f} km "
               f"收敛={cold['converged']}  ← 说明无先验时 3 星易落入错误盆地")
     else:
-        # ≥4 星：完整 SPS。冷启动（质心先验）仍可能因整数毫秒消模糊落错盆地，
-        # 真实接收机由上次定位/AGPS 提供 ~300km 内先验。本数据（ION SiGe 样本）的
-        # 采集地在德国慕尼黑（元数据 48.1715°N, 11.8087°E, h≈577m），故用慕尼黑先验。
-        region_prior = _ecef_of(48.1715, 11.8087, 0.0)
-        print("   说明：≥4 星为完整 SPS；先给'慕尼黑区域先验'(48.17°N,11.81°E) 求解：")
-        sol = solve_robust(meas, earth_constraint=False, p0=region_prior, init=region_prior)
-        cold = solve_robust(meas, earth_constraint=False)
-        clat, clon, ch = ecef_to_llh(cold["pos"])
-        print(f"   （对照）质心冷启动解：lat={clat:.4f}° lon={clon:.4f}° h={ch/1e3:.2f} km "
-              f"收敛={cold['converged']}  ← 说明冷启动消模糊不稳")
+        # ≥4 星：完整 SPS，**不需要任何先验位置**。
+        # 早期版本这里给了一个"慕尼黑区域先验"（照抄 ION 元数据的 <position>），
+        # 结果落进错误的整毫秒盆地、报出 ~40 km 残差 —— 那是搜索问题，不是数据问题。
+        # 现在用 solve_cold_start：0.5° 细网格全球搜 + 多个候选盆地各自精化，
+        # 按最终残差挑最优。代价函数含 300 km 硬台阶、真盆地只有约 100–200 km 宽，
+        # 粗网格（≥1°）会直接跨过去 —— 见 pvt.solve_cold_start 的 docstring。
+        print("   说明：≥4 星为完整 SPS，**不给任何先验**，直接冷启动求解：")
+        sol = solve_cold_start(meas)
+        clat, clon, ch = ecef_to_llh(sol["pos"])
+        print(f"   冷启动定位：lat={clat:.5f}° lon={clon:.5f}° h={ch:.1f} m  "
+              f"（试了 {sol.get('cold_start_candidates')} 个候选盆地，取残差最小者）")
+        # 对照：盲信元数据 <position>（慕尼黑）会落到错误盆地
+        wrong = _ecef_of(48.1715, 11.8087, 0.0)
+        sol_w = solve_robust(meas, earth_constraint=False, p0=wrong, init=wrong)
+        wlat, wlon, wh = ecef_to_llh(sol_w["pos"])
+        wr = np.asarray(sol_w["residuals"])
+        print(f"   （对照）用元数据坐标(慕尼黑)当先验：lat={wlat:.4f}° lon={wlon:.4f}° "
+              f"残差RMS={np.sqrt((wr**2).mean())/1e3:.2f} km  ← 错误盆地")
 
     # 迭代重算卫星位置：Sagnac 的 θ = ω·ρ/c 需要接收机位置，第一次解算时只能用
     # 「卫星星下点的地表点」当标称值，会留下每星固定的米级偏差（见 pvt.refine_measurements）。
@@ -236,12 +244,16 @@ def main() -> int:
 
     print("\n" + "=" * 78)
     if sol["converged"] and sol["n_sat"] >= 4:
-        print(f"✅ PVT 定位成功（真实数据，{len(meas)} 星完整 SPS）。")
-        print("   注：本数据（SiGe 8-bit）残差约 ±40 km（≈0.13 ms）。奇偶校验"
-              "（ephemeris.parity_failures）确认全部子帧 0 失败、IGS 权威星历比对")
-        print("   也确认星历与卫星位置无误，故残余在【量测侧】。但根因尚未定位：")
-        print("   Sagnac 标称接收机、码环带宽、采样率等已排除（均为米级效应，")
-        print("   量级不符）；Nottingham（scripts/14）同一套代码可达米级。")
+        print(f"✅ PVT 定位成功（真实数据，{len(meas)} 星完整 SPS，无任何先验）。")
+        print("   本数据（ION GNSS SDR 元数据标准样本，SiGe GN3S v3，2013-05-23）"
+              "的采集地：")
+        print("     · 元数据 <position> 写的是德国慕尼黑 —— 但那是**占位值**")
+        print("       （<campaign>Demo data</campaign>；且慕尼黑处有 4 颗星在地平线下、")
+        print("        斜距超过地面接收机的物理上限，几何不成立）；")
+        print("     · 由数据本身反解：39.2877°N / 82.0634°W（美国俄亥俄州 Athens 附近），")
+        print("       距 Ohio University 约 5.7 km —— 与元数据里的 <contact>Sanjeev</contact>")
+        print("       （Sanjeev Gunawardena，2013 年任职于 Ohio University 航空电子工程中心、")
+        print("        亦为 ION GNSS SDR 元数据标准共同作者）完全吻合。")
         rc = 0
     else:
         print("❌ PVT 未收敛。")

@@ -28,6 +28,8 @@ curl -L -o nottingham_gps_l1_1bit.bin \
 ```
 
 - 约 55.8 MB（约 77 秒），1-bit 量化（每字节 8 个采样点），**字节内 LSB 优先**
+- 注：与 SiGe 相反，这份数据是**真 1-bit**（每采样 1 位，8 个采样打包成 1 字节）；
+  SiGe 那份虽名为 `8bit`，实际只有 2-bit 电平（±1/±3），见上
 - 原始来源：jks.com/gps/gps.html（Nottingham GPS 数据集），
   本链接转自 [JiaoXianjun/GNSS-GPS-SDR](https://github.com/JiaoXianjun/GNSS-GPS-SDR)；
   更上游是 Michele Bavaro 的 GPS 博客（2010 年，原链接已失效）
@@ -62,12 +64,17 @@ curl -L -r 0-654719999 -o sige_gps_l1_8bit.dat \
 ```
 
 - 元数据（采样率/中频/编码/采集位置）：<https://sdr.ion.org/SiGe/SiGe_Bands-L1.sdrx>
-- ⚠️ **元数据里的采集地坐标不可信**：`<position>` 写的是德国慕尼黑
+- ⚠️ **元数据里的采集地坐标是占位值**：`<position>` 写的是德国慕尼黑
   （`lat=48.1715°, lon=11.8087°, h≈577 m`，`<toa>2013-05-23T00:00:00Z`），但该条目
   `<campaign>` 写的是 "Demo data"。用 IGS 权威广播星历独立反算，**7 颗被跟踪的卫星里
   有 4 颗在该坐标处位于地平线以下**（−6°/−15°/−19°/−27°），斜距 26,700–28,700 km
-  远超地面接收机的物理上限（≈25,776 km）；而量测本身指向约 30°N/94°W（7 颗全可见）。
-  **因此不能拿它当真值**；判定过程见 `scripts/18_igs_ephemeris_check.py`。
+  远超地面接收机的物理上限（≈25,776 km）。判定过程见 `scripts/18_igs_ephemeris_check.py`。
+- ✅ **由数据自身反解出的采集位置**（`scripts/07_sige_pvt_test.py`，无先验冷启动）：
+  **39.2877°N / 82.0634°W，h ≈ 279 m** —— 美国俄亥俄州 Athens 附近，距 Ohio University
+  约 5.7 km（元数据的 `<contact>` 是 Sanjeev Gunawardena，时任 Ohio University
+  航空电子工程中心研究工程师、ION GNSS SDR 元数据标准共同作者）。
+  7 星伪距残差 **RMS 1.88 m**、留一法位置漂移 5.8 m。这是**数据自洽的产物**，
+  不是在拿外部真值做验证。
 - 验证脚本：`scripts/05_sige_ephemeris_test.py`（星历）、PVT 脚本复用同一份数据
 
 ### ①c 合成数据（gps-sdr-sim，**唯一有精确真值的数据**）

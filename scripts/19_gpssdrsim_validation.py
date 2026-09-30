@@ -113,11 +113,36 @@ SETTLE_MS = int(_opt_float("settle", SETTLE_MS))
 # 5.456 MHz 只有 5.33 采样点/码片，提高采样率可检验相关器量化是不是精度瓶颈。
 FS = _opt_float("fs", FS)
 F_IF = _opt_float("if", F_IF)
+# 量化位数（--quant=N）：把 8-bit 合成样本降到 N-bit，复现真实前端的数据格式。
+# 动机：真实数据集是 1-bit（Nottingham）或 2-bit（SiGe，实测只有 ±1/±3 四个电平），
+# 而 gps-sdr-sim 默认输出 8-bit。量化是有损非线性，必须量化验证它对码相位的影响。
+QUANT_BITS = int(_opt_float("quant", 8))
+
+
+def quantize_signal(x: np.ndarray, bits: int) -> np.ndarray:
+    """按 N-bit 量化实数中频（含 AGC 门限），复现前端的数据格式。
+
+    1-bit：纯符号（Sign），如 Nottingham。
+    2-bit：符号-幅值 4 电平 {±1, ±3}。门限按 SiGe 实测的「|x|=3 占 34.1%」
+           反推 t ≈ 0.953σ（对高斯输入，P(|x|>0.953σ) = 0.341）。
+           这正是 GNSS 2-bit 量化的常用门限（最优值 ≈0.98σ）。
+    其余：原样返回（8-bit 已是仿真器的原生输出）。
+    """
+    x = np.asarray(x, dtype=float)
+    if bits >= 8:
+        return x
+    if bits == 1:
+        return np.where(x >= 0.0, 1.0, -1.0)
+    t = 0.953 * float(x.std())
+    mag = np.where(np.abs(x) >= t, 3.0, 1.0)
+    return np.where(x >= 0.0, mag, -mag)
 # 默认档（5.456 MHz / 1.364 MHz）保持与既有缓存同名，避免白白重跑；
 # 只有改了采样率或中频才加后缀。
 _TAG = f"b{DLL_BW_HZ:g}p{PLL_BW_HZ:g}s{SETTLE_MS}"
 if abs(FS - 5.456e6) > 1.0 or abs(F_IF - 1.364e6) > 1.0:
     _TAG += f"f{FS/1e6:g}i{F_IF/1e6:g}"
+if QUANT_BITS != 8:
+    _TAG += f"q{QUANT_BITS}"
 _TAG = _TAG.replace(".", "p")
 _FS_SUF = "" if abs(FS - 5.456e6) < 1.0 else f"_{FS/1e6:g}MHz"
 IQ_RAW = ROOT / "data" / "raw" / "sim" / f"gpssim_iq8{_FS_SUF}.bin"
@@ -215,8 +240,14 @@ def get_tracking(regen: bool = False) -> dict:
 
     print(f"③ 捕获 + 闭环跟踪（码环噪声带宽 {DLL_BW_HZ:g} Hz）")
     data = read_real_int8(REAL_DAT)
+    if QUANT_BITS != 8:
+        raw_rms = float(np.sqrt((data ** 2).mean()))
+        data = quantize_signal(data, QUANT_BITS)
+        print(f"   量化到 {QUANT_BITS}-bit（原数据 RMS={raw_rms:.1f}）："
+              f"新 RMS={float(np.sqrt((data**2).mean())):.2f}，"
+              f"取值集合={np.unique(data)[:6].tolist()}")
     n_ms = int(data.size / (FS / 1e3))
-    print(f"   读入 {data.size} 采样点（{data.size/FS:.1f} 秒，8-bit 实数）")
+    print(f"   读入 {data.size} 采样点（{data.size/FS:.1f} 秒）")
     acqs = acquire_all(data, FS, F_IF, ms=5, doppler_half_range=6000, doppler_step=250)
     found = sorted(detect(acqs, threshold=THRESHOLD), key=lambda a: -a["peak_ratio"])
     found = dedupe_detections(found, FS)[:N_CHANNELS]

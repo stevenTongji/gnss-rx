@@ -97,22 +97,30 @@ pseudorange residual **RMS 1.4 m**.
 > horizontal solutions differ by 9.4 m** (different geometry; any per-satellite systematic error
 > would push them apart).
 >
-> (The SiGe 8-bit dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28). Its ION metadata
-> carries `<position>` = Munich, Germany (48.1715°N/11.8087°E), but **that coordinate does not
-> survive checking**: recomputing with the IGS authoritative broadcast ephemeris shows 4 of the 7
-> tracked satellites are **below the horizon** there (−6°/−15°/−19°/−27°), with ranges of
-> 26,700–28,700 km versus the ≈25,776 km physical maximum for a ground receiver; the measurements
-> themselves point to ≈30°N/94°W, where all 7 are visible. That metadata entry carries
-> `<campaign>Demo data</campaign>`, so it is a placeholder — **it cannot be used as truth**.
-> See `scripts/18_igs_ephemeris_check.py`.)
+> (The SiGe dataset yields **7 clean satellites** (PRN 1/7/8/9/11/17/28). Its ION metadata
+> carries `<position>` = Munich, Germany (48.1715°N/11.8087°E), but **that is a placeholder**:
+> recomputing with the IGS authoritative broadcast ephemeris shows 4 of the 7 tracked satellites
+> are **below the horizon** there (−6°/−15°/−19°/−27°), with ranges of 26,700–28,700 km versus the
+> ≈25,776 km physical maximum for a ground receiver. The entry carries
+> `<campaign>Demo data</campaign>`.)
+>
+> **The data itself answers the question**: a prior-free cold start gives
+> **39.2877°N / 82.0634°W, h ≈ 279 m** (near Athens, Ohio, USA), with 7-satellite pseudorange
+> residuals of **RMS 1.88 m**, GDOP 3.65, and a leave-one-out position drift of **5.8 m**.
+> That point is **5.7 km from Ohio University**, and the metadata's `<contact>` is
+> Sanjeev Gunawardena — a research engineer at the **Ohio University Avionics Engineering Center**
+> and a co-author of the ION GNSS SDR Metadata Standard. **The metadata coordinate is a
+> placeholder; the data's own position is self-consistent and reproducible.**
 >
 > **So we currently hold no dataset with trustworthy surveyed coordinates**: Nottingham was only
 > ever claimed to yield "a position in Nottingham" (original source: Michele Bavaro's blog of
 > 2010-11-12, captured with "Primo" / "NSL's GNSS data grabber" — **no coordinates ever given**),
-> and SiGe's coordinate is the placeholder above. This repo therefore **no longer treats any
-> dataset's position as absolute truth**, and instead uses two verifiable independent references:
-> ① satellite side — IGS authoritative broadcast ephemeris (below); ② receiver side — self-checks
-> needing no external reference (residual × PDOP, satellite-subset consistency).
+> and SiGe's coordinate is the placeholder above. This repo therefore **does not treat any
+> dataset's position as absolute truth**, and instead relies on two verifiable independent
+> references: ① satellite side — IGS authoritative broadcast ephemeris (below); ② receiver
+> side — self-checks needing no external reference (residual RMS, formal precision,
+> leave-one-out position stability). (SiGe's 39.29°N / 82.06°W is a **product of the data's own
+> consistency**, not a validation against an external truth.)
 
 ![PVT positioning result](docs/figures/pvt_result.png)
 
@@ -144,11 +152,37 @@ the residuals are metre level. All three panels are reproduced from cache by
 is "disambiguate the integer millisecond using the candidate point (per-satellite rounding) → spread of
 the residuals". Because the cross-satellite differences of `ρ_raw` contain exact integer-millisecond
 steps (±k·c ms), the rounding cancels them **exactly**: the cost is ~0 only at the true position and
-jumps elsewhere. Coarse search (1°) → fine search → iterated least squares. On Nottingham the solver
-reaches 52.93491°N / 1.16494°W **with no prior whatsoever** — identical (within <10 m) to the
-prior-aided result.
+jumps elsewhere.
+
+> ⚠️ **That cost curve is saw-toothed**: neighbouring false minima are only ~300 km apart, while the
+> "all roundings correct" true basin is only **~100–200 km wide**. So **you must not simply take the
+> best coarse-grid point**. That is exactly how this project first reported a ~40 km residual on SiGe
+> — the code was right, the data was right, **the search grid was too coarse** (default 3°, 2° in the
+> diagnostic). The fixed version does a 0.5° global sweep, takes the **top 12 mutually separated
+> candidate basins**, refines each in two local stages, runs least squares on every one, and **picks
+> the smallest final residual** (full reasoning in the `pvt.solve_cold_start` docstring).
+>
+> Measured: taking only the best coarse point leaves 18.9 / 12.8 / 9.3 km at step 3°/2°/1° (SiGe);
+> with the multi-basin + residual-arbitration scheme it is **1.88 m from 1° down**. Both real datasets
+> now need **no prior at all**: SiGe **39.2877°N / 82.0634°W** (residual 1.88 m), Nottingham
+> **52.93491°N / 1.16494°W** (residual 1.42 m).
 
 ![Cold-start cost terrain](docs/figures/pvt_coldstart.png)
+
+Left: the global 1° sweep (130×360 points) has a median cost of 81 km and **only one single point
+below 10 km** — the true site. The basin really is that narrow; a slightly coarser grid misses it
+entirely (which is what produced SiGe's 40 km false solution). Right: zoom near the site — the cost is
+conical (`cost ≈ 0.55 × distance to the site`), with `1 / 10 / 30 / 60 km` contours bounding the
+convergence region, saturating at ~80 km beyond ~150 km where the per-satellite rounding slips one ms.
+
+![Grid step vs the true basin](docs/figures/pvt_basins.png)
+
+**The grid step decides whether you reach the true basin.** Left SiGe, right Nottingham; red = "use
+only the best coarse point as prior" (the old way), blue = this implementation (top-12 basins refined
+individually + final-residual arbitration). On SiGe the old way still leaves 9.3 km at 1°, while the new
+way reaches **1.88 m**; at 3°/2° even the new way still fails (4.0 / 3.0 km), so the default step is
+0.5°. Nottingham's basin is friendlier — both ways converge to 1.42 m at 1°. This figure is the complete
+causal chain of that 40 km false solution.
 
 Left: the global 1° coarse search (130×360 cells) has a median cost of 81 km and **exactly one cell
 below 10 km** — where the site is. Right: zoomed near the site, the cost forms a cone (measured
@@ -170,10 +204,11 @@ integer-millisecond ambiguity → `build_measurement` → least squares) to prov
 ![Positioning accuracy ladder](docs/figures/pvt_accuracy.png)
 
 The accuracy ladder. The first 6 rows are "difference from known truth"; **neither real dataset has
-trustworthy surveyed coordinates** (Nottingham never published any; SiGe's metadata coordinate is
-refuted by the IGS ephemeris, see below), so they are represented by self-check metrics that need no
-external reference (Nottingham: subset consistency 9.4 m, formal precision 3.2 m). The grey rows mean
-"how far from some reference point" and **are not errors**.
+surveyed coordinates** (Nottingham never published any; SiGe's metadata `<position>` is a
+placeholder), so only **external-reference-free** self-check metrics are shown: pseudorange residual
+RMS and **leave-one-out position stability** (drop any one satellite, re-solve, take the maximum
+horizontal drift from the all-satellite solution). SiGe: residual 1.88 m, LOO drift 5.8 m;
+Nottingham: residual 1.42 m, LOO drift 5.3 m.
 
 ### Comparison with a reference implementation (RTKLIB)
 
@@ -298,19 +333,11 @@ base   = solve_series(epochs, ...)      # (3) final solve
 ```
 
 **Applied to the real-data scripts too**: `scripts/07` (SiGe) and `scripts/14` (Nottingham)
-likewise omitted `recv_nominal` and now call `pvt.refine_measurements` for one iteration.
-The effect must be reported honestly: **neither improved noticeably** —
-
-| Dataset | before | after |
-|---|---|---|
-| SiGe | 48.3215°N / 11.9992°E, residuals ±40 km | identical |
-| Nottingham | 52.934908°N / 1.164975°W, residuals ±2 m | 52.934911°N / 1.164975°W, ±2.8 m |
-
-That matches the **order-of-magnitude reasoning**: the Sagnac nominal-receiver effect is
-**metre-level** (measured 0.53 m residual std on the synthetic data), whereas SiGe's residual is
-**±40 km (≈0.13 ms)** and Nottingham is already at metre level — neither is in that regime.
-(SiGe's ±40 km remains unlocalised and needs a separate line of investigation; a metre-level
-correction cannot explain a kilometre-level error.)
+likewise omitted `recv_nominal` and now call `pvt.refine_measurements` for one iteration. Its
+*direct* effect on the real datasets is small (metre-level — consistent with the order-of-magnitude
+estimate: 0.53 m residual std on synthetic data). SiGe's ~40 km residual at the time had a
+**different cause — the search had landed in the wrong basin** (see the cold-start section above);
+after the search fix it drops to **1.88 m**, which is what that order-of-magnitude argument predicted.
 
 **Measured sweep of the DLL noise bandwidth** (taken before the fix; static scenario, only
 `TrackingConfig.dll_bandwidth_hz` changes):

@@ -32,15 +32,20 @@ from gnssrx.pvt import C_LIGHT, _grid_ecef, ecef_to_llh, llh_to_ecef, \
 PROC = ROOT / "data" / "processed"
 FIGDIR = ROOT / "docs" / "figures"
 
-# 公开采集点（仅作对照，不作为定位输入）
+# 参考坐标（**都不是实测真值**，仅作对照）
 TRUTH = {
     # ⚠️ 数据集从未公布天线坐标；此点为「诺丁汉市中心」参考点，仅作量级参照。
     "nottingham": ("Nottingham", 52.9536, -1.1505, 0.0),
-    "sige": ("慕尼黑", 48.17154012, 11.80868949, 576.86),
+    # ⚠️ SiGe 的 ION 元数据 <position> 写的是慕尼黑，但那是**占位值**
+    #    （<campaign>Demo data</campaign>；该处有 4 颗星在地平线下、斜距超过地面
+    #    接收机物理上限）。下面这个是**本仓库由数据自身反解**的位置：
+    #    无先验冷启动 → 39.2877°N / 82.0634°W / h≈279 m，7 星残差 RMS 1.9 m，
+    #    距 Ohio University（Athens, OH）约 5.7 km，与元数据 <contact>Sanjeev</contact>
+    #    （时任 Ohio University 航空电子工程中心）吻合。
+    "sige": ("SiGe（数据自解）", 39.287672, -82.063432, 278.9),
 }
-# SiGe 的整数毫秒消模糊需要一个 ~150 km 内的先验（该数据集量测一致性有限，
-# 冷启动会落到错误盆地）；真实接收机由上次定位/AGPS 提供该先验。
-SIGE_PRIOR = (48.17154012, 11.80868949)
+# 元数据里那个不可信的占位坐标，仅用于在脚注里说明"不能盲信元数据"
+SIGE_META_POS = (48.17154012, 11.80868949)
 
 # 合成数据实测结果（取自 `scripts/13_synthetic_4sat_pvt.py` 的标准输出，可复现）
 SYNTHETIC = [
@@ -88,6 +93,10 @@ def subset_consistency_m(meas, pos) -> float:
 
     这是**不依赖任何外部参考点**的自一致性检验：两组卫星几何不同，若量测里存在
     逐星系统误差（错误 t_sat、错误的整数毫秒、错锁等），两组会解出不同的位置。
+
+    ⚠️ 只适合卫星较多（≥8 颗）的数据集。卫星少时劈成两组后某组可能只剩 3 颗、
+    必须靠地球表面约束，几何很弱会把结果放大到几百米（那反映的是几何、不是量测误差）。
+    因此图里对 7 星的 SiGe 改用 `loo_stability_m`（留一法）；本函数保留作对照。
     """
     P = np.asarray(pos, float)
     lat, lon, _ = ecef_to_llh(P)
@@ -99,9 +108,32 @@ def subset_consistency_m(meas, pos) -> float:
         info.append((float(d @ up) / float(np.linalg.norm(d)), m))
     info.sort(key=lambda x: -x[0])
     half = len(info) // 2
-    s1 = solve_robust([m for _, m in info[:half]], p0=P, init=P)
-    s2 = solve_robust([m for _, m in info[half:]], p0=P, init=P)
+    g1 = [m for _, m in info[:half]]
+    g2 = [m for _, m in info[half:]]
+    # 子集只有 3 星时补上地球表面约束（否则 4 个未知数 / 3 个观测是欠定的）
+    s1 = solve_robust(g1, p0=P, init=P, earth_constraint=(len(g1) == 3))
+    s2 = solve_robust(g2, p0=P, init=P, earth_constraint=(len(g2) == 3))
     return great_circle_km(np.asarray(s1["pos"]), np.asarray(s2["pos"])) * 1e3
+
+
+def loo_stability_m(meas, pos) -> float:
+    """留一法位置稳定性：每次去掉一颗星重新定位，返回相对全体解的**最大水平偏差**（米）。
+
+    这是不依赖任何外部参考点的自校验：若量测里存在逐星系统误差（错误的整数毫秒、
+    错误锁相、错误的卫星位置），去掉不同的星会解出不同的位置。
+
+    比"按仰角劈成两组"更适合卫星数少的情形 —— 7 星劈成 4+3 时，3 星那一组必须靠
+    地球表面约束，几何很弱会放大到几百米，那反映的是几何而不是量测误差。
+    """
+    P = np.asarray(pos, float)
+    dmax = 0.0
+    for m in meas:
+        sub = [x for x in meas if x["prn"] != m["prn"]]
+        if len(sub) < 4:
+            continue
+        s = solve_robust(sub, p0=P, init=P)
+        dmax = max(dmax, great_circle_km(np.asarray(s["pos"]), P) * 1e3)
+    return dmax
 
 
 def load_cn0() -> dict[int, float]:
@@ -290,28 +322,26 @@ def fig_coldstart(nott) -> None:
 # ---------------------------------------------------------------- 图 3：精度阶梯
 
 def fig_accuracy(nott, sige) -> None:
-    # 真实数据：Nottingham 冷启动（无先验）；SiGe 用 ~150 km 内先验
+    # 两份真实数据都用**无任何先验的冷启动**（修正后的 solve_cold_start）
     sol_n = solve_cold_start(nott)
-    ln, on, _ = ecef_to_llh(sol_n["pos"])
-    _, tln, ton, thn = TRUTH["nottingham"]
-    err_n = great_circle_km(sol_n["pos"], llh_to_ecef(tln, ton, thn))
-    # 可核验的精度指标（不依赖外部参考点）：
     res_n = np.array(sol_n["residuals"], float)
-    formal_n = float(np.sqrt((res_n ** 2).mean()) * sol_n["gdop"])   # 形式精度
-    subset_n = subset_consistency_m(nott, sol_n["pos"])             # 两组子集一致性
+    rms_n = float(np.sqrt((res_n ** 2).mean()))
+    loo_n = loo_stability_m(nott, sol_n["pos"])
+    ln, on, hn = ecef_to_llh(sol_n["pos"])
 
-    prior = llh_to_ecef(*SIGE_PRIOR)
-    sol_s = solve_robust(sige, p0=prior, init=prior, earth_constraint=False)
-    ls, os_, _ = ecef_to_llh(sol_s["pos"])
-    _, tls, tos, ths = TRUTH["sige"]
-    err_s = great_circle_km(sol_s["pos"], llh_to_ecef(tls, tos, ths))
+    sol_s = solve_cold_start(sige)
+    res_s = np.array(sol_s["residuals"], float)
+    rms_s = float(np.sqrt((res_s ** 2).mean()))
+    loo_s = loo_stability_m(sige, sol_s["pos"])
+    ls, os_, hs = ecef_to_llh(sol_s["pos"])
 
+    # 两份真实数据都没有实测真值；这里只放**不依赖外部参考点**的自校验指标
     rows = list(SYNTHETIC) + [
         ("合成：3 星 + 地球约束（固有歧义）", 11449.96, "#bfa14a"),
-        ("真实 Nottingham：两组独立子集水平一致性", subset_n, "#1f6feb"),
-        ("真实 Nottingham：形式精度（残差 × PDOP）", formal_n, "#4dabf7"),
-        ("参照：SiGe 至元数据坐标（该坐标经 IGS 反证不可信）", err_s * 1e3, "#adb5bd"),
-        ("参照：Nottingham 至市中心（该参考点非天线坐标）", err_n * 1e3, "#adb5bd"),
+        ("真实 SiGe（7 星，无先验）：伪距残差 RMS", rms_s, "#8e44ad"),
+        ("真实 Nottingham（9 星，无先验）：伪距残差 RMS", rms_n, "#1f6feb"),
+        ("真实 SiGe：留一法位置稳定性（最大水平漂移）", loo_s, "#b197fc"),
+        ("真实 Nottingham：留一法位置稳定性（最大水平漂移）", loo_n, "#74c0fc"),
     ]
     labels = [r[0] for r in rows]
     vals = np.array([r[1] for r in rows], float)
@@ -333,20 +363,121 @@ def fig_accuracy(nott, sige) -> None:
     ax.text(1.06e3, len(rows) - 0.42, "1 km", fontsize=8.8, color="#8a94a6",
             ha="left", va="center")
     ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=8.8)
-    ax.set_xlabel("位置误差 (m，对数轴)")
-    ax.set_title("定位精度阶梯：合成真值（厘米级）→ 真实数据（米 / 公里级）",
+    ax.set_xlabel("位置误差 / 自校验指标 (m，对数轴)")
+    ax.set_title("定位精度阶梯：合成数据（真值已知）｜真实数据（无先验 + 残差自校验）",
                  fontsize=12)
     ax.grid(alpha=0.22, axis="x")
     ax.set_axisbelow(True)
-    fig.tight_layout(rect=(0, 0.045, 1, 1))
+    fig.tight_layout(rect=(0, 0.055, 1, 1))
     fig.text(0.012, 0.012,
-             "前 6 项为「与已知真值之差」；两份真实数据都无可信实测坐标（Nottingham 从未公布、"
-             "SiGe 元数据坐标已被 IGS 星历反证），故改用不依赖外部参考点的自校验指标；"
-             "灰条仅在说明「离某个参考点多远」，不是误差。脚本：13 / 14 / 07 / 16 / 18",
-             fontsize=7.6, color="#6b7280")
+             "上 6 项是与已知真值之差；两份真实数据都没有可信的实测坐标"
+             "（Nottingham 从未公布；SiGe 的元数据 <position> 是占位值），"
+             "故只用不依赖外部参考点的自校验指标（残差 RMS、留一法位置稳定性）。\n"
+             f"SiGe 无先验冷启动解：{ls:.4f}°N / {abs(os_):.4f}°W, h={hs:.0f} m "
+             f"（7 星残差 RMS {rms_s:.2f} m）；Nottingham：{ln:.4f}°N / {abs(on):.4f}°W, "
+             f"h={hn:.0f} m（{rms_n:.2f} m）。脚本：13 / 07 / 14 / 16 / 18 / 19",
+             fontsize=7.4, color="#6b7280")
     out = FIGDIR / "pvt_accuracy.png"
     fig.savefig(out); plt.close(fig)
-    print(f"  已保存 {out.name}  Nottingham={err_n:.2f} km  SiGe={err_s:.2f} km")
+    print(f"  已保存 {out.name}  SiGe残差={rms_s:.2f} m  Nottingham残差={rms_n:.2f} m")
+
+
+# ------------------------------------------------- 图 4：网格步长 vs 能否进真盆地
+
+def _min_cost_on_grid(meas, step: float, row_chunk: int = 200) -> tuple[float, float, float]:
+    """全球 step° 网格上代价的最小值及其位置（代价 = 消模糊后残差的散布，km）。"""
+    sats = np.array([np.asarray(m["sat_ecef"], float) for m in meas])
+    raw = np.array([m["pseudorange"] for m in meas], float)
+    cms = C_LIGHT * 1e-3
+    lats = np.arange(-80.0, 80.0 + 1e-9, step)
+    lons = np.arange(-180.0, 180.0, step)
+    best = (1e18, 0.0, 0.0)
+    for i0 in range(0, len(lats), row_chunk):
+        sub = lats[i0:i0 + row_chunk]
+        g = _grid_ecef(sub, lons)
+        d = np.linalg.norm(g[:, :, None, :] - sats[None, None, :, :], axis=-1)
+        n = np.round((d - raw) / cms)
+        z = (raw[None, None, :] + n * cms - d).std(axis=-1) / 1e3
+        k = np.unravel_index(int(np.argmin(z)), z.shape)
+        if z[k] < best[0]:
+            best = (float(z[k]), float(sub[k[0]]), float(lons[k[1]]))
+    return best
+
+
+def fig_basins(nott, sige) -> None:
+    """代价函数的「整毫秒台阶」结构 —— 为什么不能只取粗网格的最优格点。
+
+    逐星取整把 1 ms（≈300 km）的台阶精确抵消，代价曲线因此是**锯齿形**的：
+    假极小之间只隔约 300 km，而"全部取整正确"的真盆地只有约 100–200 km 宽。
+    于是粗网格的**最优格点**很可能落在假极小里 —— 这正是本项目早期在 SiGe 上
+    报出 ~40 km 残差的原因（代码没错、数据没错，是搜索粗）。
+
+    两条曲线：
+      · 红：只取粗网格最优格点当先验 —— 步长 >1° 时落到假极小（公里级残留）；
+      · 蓝：本实现 solve_cold_start（取前 12 个彼此分离的盆地各自精化 + 最小二乘，
+            按最终残差判优）—— 步长 ≤1° 即稳定进入真盆地（米级）。
+    """
+    steps = [3.0, 2.0, 1.0, 0.5, 0.25]
+    naive: dict[str, list[float]] = {}
+    robust: dict[str, list[float]] = {}
+    for tag, meas in (("SiGe（7 星）", sige), ("Nottingham（9 星）", nott)):
+        nv, rb = [], []
+        for st in steps:
+            _c, la, lo = _min_cost_on_grid(meas, st)
+            p0 = llh_to_ecef(la, lo, 0.0)
+            s = solve_robust(meas, p0=p0, init=p0, earth_constraint=False)
+            nv.append(float(np.sqrt(np.mean(np.asarray(s["residuals"], float) ** 2))))
+            sol = solve_cold_start(meas, coarse_step_deg=st)
+            rb.append(float(np.sqrt(
+                np.mean(np.asarray(sol["residuals"], float) ** 2))))
+        naive[tag] = nv
+        robust[tag] = rb
+
+    fig, axes = plt.subplots(1, 2, figsize=(13.8, 5.2), dpi=130, sharex=True)
+    x = np.arange(len(steps))
+
+    def fmt(v: float) -> str:
+        return f"{v:.2f} m" if v < 1.0 else (f"{v:.0f} m" if v < 1000 else f"{v/1e3:.1f} km")
+
+    for ax, tag in zip(axes, naive):
+        ax.plot(x, naive[tag], "o--", color="#d9534f", lw=1.6, ms=6,
+                label="① 只取粗网格最优格点 → LS（旧做法）")
+        ax.plot(x, robust[tag], "o-", color="#1f6feb", lw=2.1, ms=7,
+                label="② 前 12 个候选盆地各自精化 + LS 判优（本实现）")
+        # 只标关键点：红线的 3°（最差）与蓝线的 1°（进入真盆地）
+        ax.annotate(fmt(naive[tag][0]), (0, naive[tag][0]),
+                    textcoords="offset points", xytext=(4, 10),
+                    fontsize=9, color="#d9534f", weight="bold")
+        k = next((i for i, v in enumerate(robust[tag]) if v < 5.0), None)
+        if k is not None:
+            ax.annotate(fmt(robust[tag][k]), (k, robust[tag][k]),
+                        textcoords="offset points", xytext=(2, 11),
+                        fontsize=9, color="#1f6feb", weight="bold")
+            if k > 0:
+                ax.annotate(fmt(robust[tag][k - 1]), (k - 1, robust[tag][k - 1]),
+                            textcoords="offset points", xytext=(-2, 10),
+                            fontsize=8.4, color="#1f6feb")
+        ax.axhspan(0.5, 5.0, color="#2e9e5b", alpha=0.10)
+        ax.axhline(5.0, color="#2e9e5b", lw=1.0, ls="--", alpha=0.7)
+        ax.text(0.02, 5.6, "米级区（残差 RMS ≤ 5 m）", fontsize=8.0,
+                color="#2e9e5b", ha="left", va="bottom",
+                transform=ax.get_yaxis_transform())
+        ax.set_yscale("log")
+        ax.set_ylim(0.8, 6e4)
+        ax.set_xticks(x)
+        ax.set_xticklabels([f"{s:g}°" for s in steps])
+        ax.set_xlabel("全球搜索的网格步长（1° ≈ 111 km，已接近真盆地宽度）")
+        ax.set_ylabel("解算残差 RMS (m)")
+        ax.set_title(tag, fontsize=11)
+        ax.grid(alpha=0.22, axis="y"); ax.set_axisbelow(True)
+        ax.legend(fontsize=8.2, loc="upper right", framealpha=0.94)
+    fig.suptitle("整毫秒台阶导致的假极小：粗网格的最优点不可信，必须多盆地精化 + 残差判优",
+                 fontsize=11.5)
+    fig.tight_layout(rect=(0, 0, 1, 0.92))
+    out = FIGDIR / "pvt_basins.png"
+    fig.savefig(out); plt.close(fig)
+    print("  已保存 " + out.name + "  本实现: "
+          + " / ".join(f"{v:.2f}" for v in robust[list(robust)[0]]))
 
 
 def main() -> int:
@@ -359,6 +490,7 @@ def main() -> int:
     print("① 定位结果图"); fig_result(nott, cn0)
     print("② 冷启动代价地形"); fig_coldstart(nott)
     print("③ 精度阶梯"); fig_accuracy(nott, sige)
+    print("④ 网格步长 vs 真盆地"); fig_basins(nott, sige)
     print("\n全部完成。")
     return 0
 
